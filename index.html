@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tournament App</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Swiper.js CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/8.1.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.1.0/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.1.0/firebase-database.js"></script>
+    <!-- Swiper.js JS -->
+    <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
+
+    <style>
+        body { -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
+        .page { display: none; } .page.active { display: block; } .modal { display: none; } .modal.active { display: flex; }
+        ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: #fff7ed; } ::-webkit-scrollbar-thumb { background: #dc2626; border-radius: 5px;}
+        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type=number] { -moz-appearance: textfield; }
+        .text-gradient { background-clip: text; -webkit-background-clip: text; color: transparent; background-image: linear-gradient(to right, #dc2626, #fbbf24); }
+
+        /* Nav Animation */
+        .nav-item { transition: all 0.3s ease; }
+
+        /* Custom styles for details/summary (accordion) */
+        details.policy-accordion {
+            background-color: #fff7ed; /* bg-orange-50 */
+            border: 1px solid #fed7aa; /* border-orange-100 */
+            border-radius: 0.5rem; /* rounded-md */
+            margin-bottom: 1rem; /* mb-4 */
+            padding: 0.75rem; /* p-3 */
+        }
+        details.policy-accordion summary {
+            font-weight: 600; /* font-semibold */
+            color: #4b5563; /* text-gray-700 */
+            cursor: pointer;
+            padding: 0.25rem 0; /* Vertical padding for the summary text */
+            list-style: none; /* Remove default marker */
+            position: relative;
+        }
+        details.policy-accordion summary::-webkit-details-marker {
+            display: none; /* Hide default marker for webkit browsers */
+        }
+        details.policy-accordion summary::before {
+            content: "\f055"; /* Plus icon */
+            font-family: "Font Awesome 6 Free";
+            font-weight: 900;
+            position: absolute;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            transition: transform 0.3s ease;
+        }
+        details.policy-accordion[open] summary::before {
+            content: "\f056"; /* Minus icon */
+            transform: translateY(-50%);
+        }
+        details.policy-accordion ul {
+            margin-top: 0.5rem; /* mt-2 */
+            padding-left: 1.25rem; /* Indent the list */
+            color: #4b5563; /* text-gray-700 */
+        }
+
+        /* Notification specific styling */
+        .notification-item.unread {
+            background-color: #fffbeb; /* bg-yellow-50 */
+            border-left: 4px solid #f59e0b; /* border-yellow-500 */
+        }
+        .notification-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background-color: #ef4444; /* red-500 */
+            color: white;
+            font-size: 0.7rem;
+            line-height: 1;
+            padding: 3px 6px;
+            border-radius: 9999px; /* full circle */
+            font-weight: bold;
+            display: none; /* Hidden by default */
+        }
+
+        /* Swiper Pagination Dots Styling */
+        .swiper-pagination-bullet {
+            background-color: rgba(255, 255, 255, 0.5);
+            width: 8px;
+            height: 8px;
+        }
+        .swiper-pagination-bullet-active {
+            background-color: white;
+        }
+    </style>
+</head>
+<body class="bg-orange-50 text-gray-800 font-sans">
+
+    <div id="app-container" class="max-w-md mx-auto min-h-screen bg-white shadow-2xl border-x border-orange-100 relative">
+
+        <header id="app-header" class="p-4 bg-white/90 backdrop-blur-sm flex justify-between items-center sticky top-0 z-50 border-b border-orange-200" style="display: none;">
+            <h1 class="text-xl font-bold text-gradient">YouSEO App</h1>
+            <!-- Wallet balance display will be dynamically updated by script.js with currency -->
+            <div id="wallet-balance-header" class="px-3 py-1 bg-red-50 rounded-full text-sm font-semibold border border-red-200"><i class="fas fa-wallet text-red-500"></i> <span id="header-wallet-balance">...</span></div>
+        </header>
+
+        <main id="main-content" class="pb-24">
+            <div id="loginPage" class="page"></div>
+            <div id="homePage" class="page"></div>
+            <div id="myTournamentsPage" class="page"></div>
+            <div id="walletPage" class="page"></div>
+            <div id="profilePage" class="page"></div>
+            <div id="notificationsPage" class="page"></div> <!-- NEW Notification Page -->
+            <div id="videoPlayerPage" class="page"></div> <!-- NEW Video Player Page -->
+        </main>
+
+        <nav id="user-bottom-nav" class="fixed bottom-0 left-0 right-0 bg-gradient-to-r from-red-600 to-yellow-500 shadow-[0_-5px_15px_rgba(220,38,38,0.3)] rounded-t-2xl max-w-md mx-auto z-50" style="display: none;">
+            <div class="flex justify-around p-4 items-end">
+                <a href="#" class="nav-item text-center text-white/60" onclick="navigateTo('homePage')"><i class="fas fa-gamepad fa-lg mb-1"></i><span class="block text-[10px] font-medium">Games</span></a>
+                <a href="#" class="nav-item text-center text-white/60" onclick="navigateTo('myTournamentsPage')"><i class="fas fa-trophy fa-lg mb-1"></i><span class="block text-[10px] font-medium">Matches</span></a>
+                <!-- NEW: Notification Icon -->
+                <a href="#" class="nav-item text-center text-white/60 relative" onclick="navigateTo('notificationsPage')">
+                    <i class="fas fa-bell fa-lg mb-1"></i>
+                    <span class="notification-badge" id="unread-notifications-count" style="display: none;">0</span>
+                    <span class="block text-[10px] font-medium">Alerts</span>
+                </a>
+                <a href="#" class="nav-item text-center text-white/60" onclick="navigateTo('walletPage')"><i class="fas fa-wallet fa-lg mb-1"></i><span class="block text-[10px] font-medium">Wallet</span></a>
+                <a href="#" class="nav-item text-center text-white/60" onclick="navigateTo('profilePage')"><i class="fas fa-user-cog fa-lg mb-1"></i><span class="block text-[10px] font-medium">Profile</span></a>
+            </div>
+        </nav>
+    </div>
+
+    <!-- Modals -->
+    <div id="authModal" class="modal fixed inset-0 bg-black bg-opacity-70 items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg w-11/12 max-w-sm border border-orange-200 shadow-lg relative">
+            <button onclick="toggleModal('authModal', false)" class="absolute top-3 right-3 text-gray-500 hover:text-gray-700">
+                <i class="fas fa-times fa-lg"></i>
+            </button>
+            <h3 class="text-xl font-bold mb-4 text-center text-gradient">Welcome!</h3>
+            <p class="text-center text-gray-600 mb-6">Login or create an account to play and join tournaments.</p>
+
+            <div class="flex border-b border-gray-200 mb-4">
+                <button id="loginTabBtnModal" class="flex-1 py-2 text-center font-bold border-b-4 border-red-500 text-red-600">Login</button>
+                <button id="signupTabBtnModal" class="flex-1 py-2 text-center font-bold text-gray-400 border-b-4 border-transparent">Sign Up</button>
+            </div>
+            <form id="loginFormModal" class="space-y-4">
+                <input type="email" id="loginEmailModal" placeholder="Email" class="w-full p-3 bg-gray-50 rounded border border-gray-200 focus:outline-none focus:border-red-500" required>
+                <input type="password" id="loginPasswordModal" placeholder="Password" class="w-full p-3 bg-gray-50 rounded border border-gray-200 focus:outline-none focus:border-red-500" required>
+                <button type="submit" class="w-full text-white bg-gradient-to-r from-red-600 to-yellow-500 hover:from-red-700 hover:to-yellow-600 p-3 rounded-lg font-bold shadow-md transition-all">Login</button>
+            </form>
+            <form id="signupFormModal" class="space-y-4" style="display:none;">
+                <input type="text" id="signupUsernameModal" placeholder="Username" class="w-full p-3 bg-gray-50 rounded border border-gray-200 focus:outline-none focus:border-red-500" required>
+                <p id="usernameAvailability" class="text-xs mt-1"></p> <!-- For username availability feedback -->
+                <input type="email" id="signupEmailModal" placeholder="Email" class="w-full p-3 bg-gray-50 rounded border border-gray-200 focus:outline-none focus:border-red-500" required>
+                <input type="password" id="signupPasswordModal" placeholder="Password (min. 6 chars)" class="w-full p-3 bg-gray-50 rounded border border-gray-200 focus:outline-none focus:border-red-500" required>
+                <input type="text" id="signupReferralCodeModal" placeholder="Referral Username (Optional)" class="w-full p-3 bg-gray-50 rounded border border-gray-200 focus:outline-none focus:border-red-500">
+                <button type="submit" id="signupSubmitBtn" class="w-full text-white bg-gradient-to-r from-red-600 to-yellow-500 hover:from-red-700 hover:to-yellow-600 p-3 rounded-lg font-bold shadow-md transition-all">Create Account</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="addMoneyModal" class="modal fixed inset-0 bg-black bg-opacity-70 items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg w-11/12 max-w-sm border border-orange-200 shadow-lg">
+            <h3 class="text-xl font-bold mb-4 text-green-600">Deposit via EasyPaisa / JazzCash</h3>
+            <p class="text-sm text-gray-600 mb-4">
+                Please send the desired amount to the following number via EasyPaisa or JazzCash:<br>
+                <strong class="text-red-600 text-lg" id="admin-deposit-number">03105784772</strong><br>
+                After payment, enter the amount, Transaction ID (TID), and payment method below.
+            </p>
+            <form id="addMoneyForm" class="space-y-4">
+                <label class="block"><span class="text-gray-700 text-sm">Amount (PKR):</span>
+                    <input type="number" id="add-amount" placeholder="Enter amount (PKR)" class="w-full p-3 bg-orange-50 rounded border border-orange-200 focus:outline-none focus:border-red-500" required>
+                </label>
+                <label class="block"><span class="text-gray-700 text-sm">Transaction ID (TID):</span>
+                    <input type="text" id="deposit-tid" placeholder="Enter Transaction ID (TID)" class="w-full p-3 bg-orange-50 rounded border border-orange-200 focus:outline-none focus:border-red-500" required>
+                </label>
+                <label class="block"><span class="text-gray-700 text-sm">Payment Method:</span>
+                    <input type="text" id="deposit-source-type" placeholder="EasyPaisa / JazzCash (e.g., EasyPaisa)" class="w-full p-3 bg-orange-50 rounded border border-orange-200 focus:outline-none focus:border-red-500" required>
+                </label>
+                
+                <div class="flex items-center mt-4">
+                    <input type="checkbox" id="acceptDepositRules" class="mr-2" required>
+                    <label for="acceptDepositRules" class="text-sm text-gray-700">I accept the <a href="#" onclick="showPolicySection('deposit_rules'); return false;" class="text-blue-600 underline font-semibold">Deposit Rules</a></label>
+                </div>
+
+                <button type="submit" class="w-full text-white bg-gradient-to-r from-green-500 to-green-600 p-3 rounded font-semibold shadow-md">Confirm Deposit</button>
+                <button type="button" onclick="toggleModal('addMoneyModal', false)" class="w-full bg-gray-200 text-gray-700 p-3 rounded font-semibold">Cancel</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- UPDATED: Withdrawal Modal with Scroll and Currency options -->
+    <div id="withdrawMoneyModal" class="modal fixed inset-0 bg-black bg-opacity-70 items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg w-11/12 max-w-sm border border-orange-200 shadow-lg">
+            <div class="max-h-[80vh] overflow-y-auto pr-2">
+                <h3 class="text-xl font-bold mb-4 text-red-600">Request Withdrawal</h3>
+                <form id="withdrawMoneyForm" class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <label class="block"><span class="text-gray-700 text-sm">Amount:</span>
+                            <input type="number" id="withdraw-amount" placeholder="Enter amount" class="w-full p-3 bg-orange-50 rounded border border-orange-200" required>
+                        </label>
+                        <label class="block"><span class="text-gray-700 text-sm">Currency:</span>
+                            <select id="withdraw-currency" class="w-full p-3 bg-orange-50 rounded border border-orange-200 text-gray-700">
+                                <option value="PKR">PKR</option>
+                                <option value="INR">INR</option>
+                                <option value="USD">USD</option>
+                            </select>
+                        </label>
+                    </div>
+
+                    <label class="block"><span class="text-gray-700 text-sm">Account Type:</span>
+                        <select id="withdraw-account-type" class="w-full p-3 bg-orange-50 rounded border border-orange-200 text-gray-700">
+                            <option value="EasyPaisa">EasyPaisa</option>
+                            <option value="JazzCash">JazzCash</option>
+                            <option value="Payoneer">Payoneer</option>
+                        </select>
+                    </label>
+
+                    <label class="block"><span class="text-gray-700 text-sm">Account Details (Number/Email):</span>
+                        <input type="text" id="withdraw-number" placeholder="Account Number or Payoneer Email" class="w-full p-3 bg-orange-50 rounded border border-orange-200" required>
+                    </label>
+
+                    <label class="block"><span class="text-gray-700 text-sm">Account Owner Name:</span>
+                        <input type="text" id="withdraw-owner-name" placeholder="Full Name on Account" class="w-full p-3 bg-orange-50 rounded border border-orange-200" required>
+                    </label>
+
+                    <p class="text-sm text-gray-600 mt-4">
+                        <b>Withdrawal Rules:</b><br><br>
+                        1️⃣ Withdrawal is available only for users who play live tournament matches.<br><br>
+                        2️⃣ 20 referrals are required. A referral counts when they sign up with your code and deposit at least PKR 100.
+
+
+only accpt 1✅
+                    </p>
+
+                    <div class="flex items-center mt-4">
+                        <input type="checkbox" id="acceptWithdrawalRules" class="mr-2" required>
+                        <label for="acceptWithdrawalRules" class="text-sm text-gray-700">I accept the <a href="#" onclick="showPolicySection('withdrawal_rules'); return false;" class="text-blue-600 underline font-semibold">Withdrawal Rules</a></label>
+                    </div>
+
+                    <button type="submit" class="w-full text-white bg-gradient-to-r from-blue-500 to-blue-600 p-3 rounded font-semibold shadow-md">Request Withdrawal</button>
+                    <button type="button" onclick="toggleModal('withdrawMoneyModal', false)" class="w-full bg-gray-200 text-gray-700 p-3 rounded font-semibold">Cancel</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- NEW MODAL: Add New Game -->
+    <div id="addGameModal" class="modal fixed inset-0 bg-black bg-opacity-70 items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg w-11/12 max-w-sm border border-orange-200 shadow-lg relative">
+            <button onclick="toggleModal('addGameModal', false)" class="absolute top-3 right-3 text-gray-500 hover:text-gray-700">
+                <i class="fas fa-times fa-lg"></i>
+            </button>
+            <h3 class="text-xl font-bold mb-4 text-center text-gradient">Add New Game</h3>
+
+            <!-- Policy Section (Changed to Accordion) -->
+            <details class="policy-accordion text-sm">
+                <summary>Game Submission Policy</summary>
+                <ul class="list-disc list-inside space-y-1">
+                    <li><span class="font-bold">Cost:</span> PKR 100 will be deducted from your wallet for each game submission.</li>
+                    <li><span class="font-bold">Duration:</span> Your game will be added and live for a minimum of 30 days. After this period, it may be reviewed for performance and compliance.</li>
+                    <li><span class="font-bold">No Violations:</span> Please ensure your game content and links do not violate any laws, contain adult/offensive material, or promote illegal activities. Broken or malicious links will result in immediate removal without refund.</li>
+                    <li><span class="font-bold">Review:</span> All submitted games are subject to admin review. We reserve the right to remove any game that violates our policies at any time.</li>
+                </ul>
+            </details>
+
+            <form id="addGameForm" class="space-y-4">
+                <input type="text" id="gameTitleInput" placeholder="Game Title (e.g. Ludo)" class="w-full p-3 bg-gray-50 rounded border border-gray-200 focus:outline-none focus:border-red-500" required>
+                <input type="url" id="gameImageUrlInput" placeholder="Image URL (Thumbnail)" class="w-full p-3 bg-gray-50 rounded border border-gray-200 focus:outline-none focus:border-red-500" required>
+                <input type="url" id="gameUrlInput" placeholder="Game URL (e.g. ludo.html)" class="w-full p-3 bg-gray-50 rounded border border-gray-200 focus:outline-none focus:border-red-500" required>
+                <!-- NEW: Category Input -->
+                <input type="text" id="gameCategoryInput" placeholder="Game Category (e.g. Action, Puzzle, Betting)" class="w-full p-3 bg-gray-50 rounded border border-gray-200 focus:outline-none focus:border-red-500" required>
+                <button type="submit" class="w-full text-white bg-gradient-to-r from-red-600 to-yellow-500 hover:from-red-700 hover:to-yellow-600 p-3 rounded-lg font-bold shadow-md transition-all">Add Game</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed top-5 right-5 text-white py-2 px-4 rounded-lg shadow-lg" style="display: none; z-index: 1000;"></div>
+
+    <!-- NEW MODAL: Contact Us -->
+    <div id="contactUsModal" class="modal fixed inset-0 bg-black bg-opacity-70 items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg w-11/12 max-w-sm border border-orange-200 shadow-lg relative">
+            <button onclick="toggleModal('contactUsModal', false)" class="absolute top-3 right-3 text-gray-500 hover:text-gray-700">
+                <i class="fas fa-times fa-lg"></i>
+            </button>
+            <h3 class="text-xl font-bold mb-4 text-center text-gradient">Contact Us</h3>
+            <p class="text-center text-gray-600 mb-6">Have a question or need support? Send us a message!</p>
+            <form id="contactUsForm" class="space-y-4">
+                <input type="text" id="contactSubject" placeholder="Subject" class="w-full p-3 bg-gray-50 rounded border border-gray-200 focus:outline-none focus:border-red-500" required>
+                <textarea id="contactMessage" placeholder="Your Message" rows="5" class="w-full p-3 bg-gray-50 rounded border border-gray-200 focus:outline-none focus:border-red-500" required></textarea>
+                <button type="submit" class="w-full text-white bg-gradient-to-r from-red-600 to-yellow-500 hover:from-red-700 hover:to-yellow-600 p-3 rounded-lg font-bold shadow-md transition-all">Send Message</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- NEW MODAL: Game Deletion Notification (Persistent) -->
+    <div id="gameDeletionNotificationModal" class="modal fixed inset-0 bg-black bg-opacity-70 items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg w-11/12 max-w-sm border border-red-200 shadow-lg relative">
+            <button onclick="toggleModal('gameDeletionNotificationModal', false)" class="absolute top-3 right-3 text-gray-500 hover:text-gray-700">
+                <i class="fas fa-times fa-lg"></i>
+            </button>
+            <h3 class="text-xl font-bold mb-4 text-center text-red-600"><i class="fas fa-exclamation-circle mr-2"></i>Important Notification!</h3>
+            <div class="space-y-4">
+                <p class="text-gray-700 font-semibold" id="deletion-notification-title"></p>
+                <p class="text-gray-600" id="deletion-notification-message"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- NEW MODAL: Currency Exchange -->
+    <div id="exchangeCurrencyModal" class="modal fixed inset-0 bg-black bg-opacity-70 items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg w-11/12 max-w-sm border border-orange-200 shadow-lg relative">
+            <button onclick="toggleModal('exchangeCurrencyModal', false)" class="absolute top-3 right-3 text-gray-500 hover:text-gray-700">
+                <i class="fas fa-times fa-lg"></i>
+            </button>
+            <h3 class="text-xl font-bold mb-4 text-center text-gradient">Exchange Currency</h3>
+            
+            <p class="text-sm text-gray-600 mb-4 text-center" id="current-balance-exchange-info">Your current balance: PKR 0</p>
+
+            <form id="exchangeCurrencyForm" class="space-y-4">
+                <label class="block"><span class="text-gray-700 text-sm">Amount to Exchange:</span>
+                    <input type="number" id="exchange-amount" placeholder="Enter amount" class="w-full p-3 bg-gray-50 rounded border border-gray-200 focus:outline-none focus:border-red-500" required>
+                </label>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <label class="block"><span class="text-gray-700 text-sm">From Currency:</span>
+                        <select id="exchange-from-currency" class="w-full p-3 bg-gray-50 rounded border border-gray-200 text-gray-700" required>
+                            <option value="PKR">PKR</option>
+                            <option value="INR">INR</option>
+                            <option value="USD">USD</option>
+                        </select>
+                    </label>
+                    <label class="block"><span class="text-gray-700 text-sm">To Currency:</span>
+                        <select id="exchange-to-currency" class="w-full p-3 bg-gray-50 rounded border border-gray-200 text-gray-700" required>
+                            <option value="PKR">PKR</option>
+                            <option value="INR">INR</option>
+                            <option value="USD">USD</option>
+                        </select>
+                    </label>
+                </div>
+                
+                <p class="text-xs text-gray-500 mt-2">Exchange rates: 1 USD ≈ 280 PKR, 1 USD ≈ 83 INR, 1 PKR ≈ 0.3 INR (These are illustrative rates and can be adjusted).</p>
+                <p class="text-xs text-red-500 font-semibold" id="exchange-error-message" style="display:none;"></p>
+                <p class="text-xs text-green-600 font-semibold" id="exchange-result-message" style="display:none;"></p>
+
+                <button type="submit" class="w-full text-white bg-gradient-to-r from-red-600 to-yellow-500 hover:from-red-700 hover:to-yellow-600 p-3 rounded-lg font-bold shadow-md transition-all">Exchange</button>
+                <button type="button" onclick="toggleModal('exchangeCurrencyModal', false)" class="w-full bg-gray-200 text-gray-700 p-3 rounded font-semibold">Cancel</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Link to the separate script.js file -->
+    <script src="script.js"></script>
+</body>
+</html>
