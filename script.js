@@ -17,11 +17,12 @@ const db = firebase.database();
 
 // Global variables
 let currentUserData = null;
-let pendingAction = null; // To store action after login
-let unreadNotificationsCount = 0; // Global counter for unread notifications
-let videoRewardTimer = null; // Timer for video rewards
+let pendingAction = null;
+let unreadNotificationsCount = 0;
+let videoRewardTimer = null;
+let userSubmittedGamesListener = null; // Listener reference for user-submitted games
 
-// Dynamic app settings (will be loaded from Firebase, with defaults)
+// Dynamic app settings (from Firebase)
 let adminDepositNumber = '03105784772';
 let minWithdrawalAmount = 1200;
 let referralBonusAmount = 500;
@@ -30,24 +31,20 @@ let signupBonusAmount = 1200;
 // Home Page specific global variables for dynamic loading
 let allApprovedGames = [];
 let gamesByCategory = {};
-let displayedCategories = []; // Tracks which categories are currently shown
-const CATEGORY_CHUNK_SIZE = 1; // Initial number of categories to show
-const GAME_CHUNK_SIZE = 4;     // Initial number of games per category
-let gamesDisplayedPerCategory = {}; // { 'Category Name': count, ... }
+let displayedCategories = [];
+const CATEGORY_CHUNK_SIZE = 1;
+const GAME_CHUNK_SIZE = 4;
+let gamesDisplayedPerCategory = {};
 
 let searchResults = [];
 const SEARCH_RESULT_CHUNK_SIZE = 20;
 let searchGamesDisplayed = 0;
 
-// Currency exchange rates (can be managed by admin in Firebase: /exchange_rates)
-// Default rates, loaded from Firebase later.
+// Currency exchange rates (from Firebase)
 let exchangeRates = {
-    'PKR_to_INR': 0.3,
-    'PKR_to_USD': 0.0035,
-    'INR_to_PKR': 3.33,
-    'INR_to_USD': 0.012,
-    'USD_to_PKR': 280,
-    'USD_to_INR': 83
+    'PKR_to_INR': 0.3, 'PKR_to_USD': 0.0035,
+    'INR_to_PKR': 3.33, 'INR_to_USD': 0.012,
+    'USD_to_PKR': 280, 'USD_to_INR': 83
 };
 
 
@@ -57,7 +54,6 @@ let exchangeRates = {
  * @param {object} [data=null] - Optional data to pass to the rendering function.
  */
 function navigateTo(pageId, data = null) {
-    // NEW: Clear any running video timer when navigating away from the video page
     if (videoRewardTimer) {
         clearInterval(videoRewardTimer);
         videoRewardTimer = null;
@@ -67,14 +63,12 @@ function navigateTo(pageId, data = null) {
     const pageElement = document.getElementById(pageId);
     if(pageElement) {
         pageElement.classList.add('active');
-        loadPageContent(pageId, data); // Load content for the new active page, passing data
+        loadPageContent(pageId, data);
     }
 
     document.querySelectorAll('.nav-item').forEach(item => {
         const isActive = item.getAttribute('onclick').includes(pageId);
         item.className = 'nav-item text-center transition-all duration-300';
-
-        // Check if the current nav-item is the notification button
         const isNotificationNav = item.querySelector('.fa-bell');
 
         if (isActive) {
@@ -83,7 +77,6 @@ function navigateTo(pageId, data = null) {
             item.classList.add('text-white/60', 'scale-100');
         }
 
-        // Keep notification badge visible regardless of active state if unread count > 0
         const notificationBadge = document.getElementById('unread-notifications-count');
         if (isNotificationNav && notificationBadge) {
             if (unreadNotificationsCount > 0) {
@@ -94,7 +87,7 @@ function navigateTo(pageId, data = null) {
             }
         }
     });
-    window.scrollTo(0, 0); // Scroll to top of the new page
+    window.scrollTo(0, 0);
 }
 
 /**
@@ -111,26 +104,17 @@ function showToast(message, isError = false) {
 }
 
 /**
- * Formats a number as a currency string based on the given currency code.
+ * Formats a number as a currency string.
  * @param {number} amount - The amount to format.
  * @param {string} currencyCode - The currency code (e.g., 'PKR', 'INR', 'USD').
  * @returns {string} The formatted currency string.
  */
 function formatCurrency(amount, currencyCode) {
-    let locale = 'en-US'; // Default
-    let options = { style: 'currency', currency: currencyCode, minimumFractionDigits: 0, maximumFractionDigits: 2 };
-
     switch (currencyCode) {
-        case 'PKR':
-            // Use custom formatting for "Rs" instead of "PKR"
-            return `Rs ${new Intl.NumberFormat('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 2}).format(amount)}`;
-        case 'INR':
-            return `₹${new Intl.NumberFormat('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 2}).format(amount)}`;
-        case 'USD':
-            return `$${new Intl.NumberFormat('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(amount)}`;
-        default:
-            // Fallback for unknown currency
-            return `${currencyCode} ${new Intl.NumberFormat(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(amount)}`;
+        case 'PKR': return `Rs ${new Intl.NumberFormat('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 2}).format(amount)}`;
+        case 'INR': return `₹${new Intl.NumberFormat('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 2}).format(amount)}`;
+        case 'USD': return `$${new Intl.NumberFormat('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(amount)}`;
+        default: return `${currencyCode} ${new Intl.NumberFormat(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(amount)}`;
     }
 }
 
@@ -174,7 +158,7 @@ function checkLoginAndAct(event, actionType, ...args) {
  */
 function getFormattedBalance(currency = null) {
     if (!currentUserData || !currentUserData.wallet) {
-        return formatCurrency(0, 'PKR'); // Default for logged out or no wallet
+        return formatCurrency(0, 'PKR');
     }
     const targetCurrency = currency || currentUserData.preferred_currency || 'PKR';
     const balance = currentUserData.wallet[targetCurrency] || 0;
@@ -184,169 +168,137 @@ function getFormattedBalance(currency = null) {
 
 /**
  * Firebase Authentication state change listener.
- * Manages UI visibility and user data loading upon login/logout.
  */
 auth.onAuthStateChanged(async user => {
-    const showAppControls = user ? true : false;
+    const showAppControls = !!user;
     document.getElementById('app-header').style.display = showAppControls ? 'flex' : 'none';
     document.getElementById('user-bottom-nav').style.display = showAppControls ? 'block' : 'none';
 
-    // Fetch app settings early (on auth state change)
-    const appSettingsSnap = await db.ref('app_settings').once('value');
-    const appSettings = appSettingsSnap.val();
-    if (appSettings) {
-        adminDepositNumber = appSettings.adminDepositNumber || adminDepositNumber;
-        minWithdrawalAmount = appSettings.minWithdrawalAmount || minWithdrawalAmount;
-        referralBonusAmount = appSettings.referralBonusAmount || referralBonusAmount;
-        signupBonusAmount = appSettings.signupBonusAmount || signupBonusAmount;
+    // Fetch app settings and exchange rates regardless of login state
+    try {
+        const appSettingsSnap = await db.ref('app_settings').once('value');
+        const appSettings = appSettingsSnap.val();
+        if (appSettings) {
+            adminDepositNumber = appSettings.adminDepositNumber || adminDepositNumber;
+            minWithdrawalAmount = appSettings.minWithdrawalAmount || minWithdrawalAmount;
+            referralBonusAmount = appSettings.referralBonusAmount || referralBonusAmount;
+            signupBonusAmount = appSettings.signupBonusAmount || signupBonusAmount;
+            const adminDepositNumEl = document.getElementById('admin-deposit-number');
+            if (adminDepositNumEl) adminDepositNumEl.textContent = adminDepositNumber;
+            const withdrawAmountInput = document.getElementById('withdraw-amount');
+            if (withdrawAmountInput) withdrawAmountInput.placeholder = `Enter amount min ${minWithdrawalAmount}`;
+            const referralBonusTextEl = document.getElementById('referral-bonus-text');
+            if (referralBonusTextEl) referralBonusTextEl.textContent = referralBonusAmount;
+        }
 
-        const adminDepositNumEl = document.getElementById('admin-deposit-number');
-        if (adminDepositNumEl) adminDepositNumEl.textContent = adminDepositNumber;
-        const withdrawAmountInput = document.getElementById('withdraw-amount');
-        if (withdrawAmountInput) withdrawAmountInput.placeholder = `Enter amount min ${minWithdrawalAmount}`;
-        const referralBonusTextEl = document.getElementById('referral-bonus-text');
-        if (referralBonusTextEl) referralBonusTextEl.textContent = referralBonusAmount;
+        const exchangeRatesSnap = await db.ref('exchange_rates').once('value');
+        if (exchangeRatesSnap.exists()) {
+            exchangeRates = { ...exchangeRates, ...exchangeRatesSnap.val() };
+        }
+    } catch (error) {
+        console.error("Error fetching global settings:", error);
+        showToast("Failed to load app settings. Some features may not work correctly.", true);
     }
 
-    // Fetch exchange rates
-    const exchangeRatesSnap = await db.ref('exchange_rates').once('value');
-    if (exchangeRatesSnap.exists()) {
-        exchangeRates = { ...exchangeRates, ...exchangeRatesSnap.val() };
-    }
 
     if (user) {
         try {
-            // First, fetch the user's data once to get the definitive state.
             const userSnap = await db.ref('users/' + user.uid).once('value');
             const fetchedUserData = userSnap.val();
 
             if (fetchedUserData) {
-                // Ensure wallet structure and preferred currency exist
                 if (!fetchedUserData.wallet) {
                     fetchedUserData.wallet = { PKR: fetchedUserData.wallet_balance || 0, INR: 0, USD: 0 };
-                    delete fetchedUserData.wallet_balance; // Remove old field if migrating
+                    delete fetchedUserData.wallet_balance;
                 }
                 if (!fetchedUserData.preferred_currency) {
                     fetchedUserData.preferred_currency = 'PKR';
                 }
                 currentUserData = { uid: user.uid, ...fetchedUserData };
-                console.log("DEBUG (onAuthStateChanged): Fetched existing user data:", currentUserData);
             } else {
-                // If it's a brand new user and no data is in DB yet, initialize with signup bonus.
-                console.log(`DEBUG (onAuthStateChanged): No existing data for user ${user.uid}. Initializing with signup defaults.`);
+                // New user initialization
                 currentUserData = {
-                    uid: user.uid,
-                    email: user.email || 'N/A',
-                    username: user.email ? user.email.split('@')[0] : 'User',
-                    wallet: { // NEW: wallet object
-                        PKR: signupBonusAmount,
-                        INR: 0,
-                        USD: 0
-                    },
-                    preferred_currency: 'PKR', // NEW: preferred currency
-                    referrals_earned_count: 0,
-                    referral_code: user.email ? user.email.split('@')[0] : 'User',
-                    locked: false,
-                    lockReason: null
+                    uid: user.uid, email: user.email, username: user.email.split('@')[0],
+                    wallet: { PKR: signupBonusAmount, INR: 0, USD: 0 }, preferred_currency: 'PKR',
+                    referrals_earned_count: 0, referral_code: user.email.split('@')[0].toLowerCase(), locked: false, lockReason: null
                 };
             }
 
-            // After initial `currentUserData` is set (either from DB or with signup defaults),
-            // set up the *real-time* listener for user data AND notifications.
+            // Real-time listener for user data
             db.ref('users/' + user.uid).on('value', snap => {
-                const updatedDataFromListener = snap.val();
-                if (updatedDataFromListener) {
-                    // Ensure wallet structure is maintained by listener as well
-                    if (!updatedDataFromListener.wallet) {
-                        updatedDataFromListener.wallet = { PKR: updatedDataFromListener.wallet_balance || 0, INR: 0, USD: 0 };
-                        delete updatedDataFromListener.wallet_balance;
-                    }
-                    if (!updatedDataFromListener.preferred_currency) {
-                        updatedDataFromListener.preferred_currency = 'PKR';
-                    }
-                    currentUserData = { uid: user.uid, ...updatedDataFromListener };
-                    console.log("DEBUG (Real-time listener): Updated currentUserData:", currentUserData);
-                } else {
-                    console.warn(`DEBUG (Real-time listener): Received null data for ${user.uid}. Ignoring to prevent overwrite.`);
-                    return; 
-                }
+                const updatedData = snap.val();
+                if (updatedData) {
+                    if (!updatedData.wallet) updatedData.wallet = { PKR: updatedData.wallet_balance || 0, INR: 0, USD: 0 };
+                    if (!updatedData.preferred_currency) updatedData.preferred_currency = 'PKR';
+                    currentUserData = { uid: user.uid, ...updatedData };
 
-                // --- UI UPDATES (Always reflect current `currentUserData`) ---
-                const headerWalletBalanceEl = document.getElementById('header-wallet-balance');
-                if (headerWalletBalanceEl) headerWalletBalanceEl.textContent = getFormattedBalance();
+                    document.getElementById('header-wallet-balance').textContent = getFormattedBalance();
+                    if (document.getElementById('profilePage').classList.contains('active')) updateProfileContent();
+                    if (document.getElementById('walletPage').classList.contains('active')) renderWalletPage(document.getElementById('walletPage'));
 
-                if (document.getElementById('profilePage').classList.contains('active')) {
-                    updateProfileContent();
-                }
-                if (document.getElementById('walletPage').classList.contains('active')) {
-                    renderWalletPage(document.getElementById('walletPage')); // Re-render wallet page to update all balances
-                }
-                // --- END UI UPDATES ---
-
-                // Handle account locked status
-                if (currentUserData.locked) {
-                    if (auth.currentUser && auth.currentUser.uid === user.uid) {
+                    if (currentUserData.locked) {
                         auth.signOut();
-                        const lockReason = currentUserData.lockReason ? `Reason: ${currentUserData.lockReason}` : 'No specific reason provided.';
-                        showToast(`Your account has been locked. Please contact support. ${lockReason}`, true);
+                        showToast(`Account locked: ${currentUserData.lockReason || 'Contact support'}.`, true);
                     }
-                    return;
                 }
             });
 
-            // NEW: Real-time listener for unread notifications count
+            // Real-time listener for unread notifications
             db.ref(`notifications/${user.uid}`).orderByChild('status').equalTo('unread').on('value', snapshot => {
                 unreadNotificationsCount = snapshot.numChildren();
-                const notificationBadge = document.getElementById('unread-notifications-count');
-                if (notificationBadge) {
-                    if (unreadNotificationsCount > 0) {
-                        notificationBadge.textContent = unreadNotificationsCount;
-                        notificationBadge.style.display = 'block';
-                    } else {
-                        notificationBadge.style.display = 'none';
-                    }
+                const badge = document.getElementById('unread-notifications-count');
+                if (badge) {
+                    badge.textContent = unreadNotificationsCount;
+                    badge.style.display = unreadNotificationsCount > 0 ? 'block' : 'none';
                 }
-                // If on notifications page, re-render to update highlights/counts
-                if (document.getElementById('notificationsPage').classList.contains('active')) {
-                    renderNotificationsPage(document.getElementById('notificationsPage'));
+                if (document.getElementById('notificationsPage').classList.contains('active')) renderNotificationsPage(document.getElementById('notificationsPage'));
+            });
+
+            // NEW FEATURE: Real-time listener for user's submitted games to check for play limit reached
+            if (userSubmittedGamesListener) { // Detach previous listener if exists before attaching a new one
+                db.ref('games').off('value', userSubmittedGamesListener);
+            }
+            userSubmittedGamesListener = db.ref('games').orderByChild('created_by').equalTo(user.uid).on('value', snapshot => {
+                const submittedGames = snapshot.val();
+                if (submittedGames) {
+                    for (const gameId in submittedGames) {
+                        const game = submittedGames[gameId];
+                        // Check if game status changed to 'completed' (due to play limit) and user hasn't been notified yet
+                        if (game.status === 'completed' && !game.notified_play_limit_reached) {
+                            db.ref(`notifications/${user.uid}`).push({
+                                title: `Game Play Limit Reached! 🥳`,
+                                message: `Your game "${game.title}" reached its play limit of ${game.play_limit} and is now hidden from the homepage. You can re-add it from your profile.`,
+                                timestamp: new Date().toISOString(),
+                                status: 'unread',
+                                type: 'game_limit_reached'
+                            }).then(() => {
+                                db.ref(`games/${gameId}`).update({ notified_play_limit_reached: true }); // Mark as notified
+                                // Optionally, re-render profile page if open to update game status
+                                if (document.getElementById('profilePage').classList.contains('active')) {
+                                    renderProfilePage(document.getElementById('profilePage'));
+                                }
+                            }).catch(error => {
+                                console.error("Error sending game_limit_reached notification:", error);
+                                // The original error "Missing catch or finally after try" might have been in this part.
+                                // Adding a catch here for robustness.
+                                showToast("Failed to send play limit notification.", true);
+                            });
+                        }
+                    }
                 }
             });
 
 
-            // The code below should now run *after* the initial `currentUserData` is set.
-            // If it's a new signup, the `signupForm` handler will write data, and *then* this listener will pick it up.
-
-            // Re-added: Game play reward logic for standalone games
+            // Game played reward for non-tournament games
             if (localStorage.getItem('game_played_pending') === 'true') {
-                localStorage.removeItem('game_played_pending'); // Clear the flag immediately
-                console.log("DEBUG: game_played_pending detected. Attempting to add 1 PKR.");
-                const walletPKRRef = db.ref(`users/${user.uid}/wallet/PKR`); // NEW: Target PKR wallet
-                walletPKRRef.transaction((currentBalance) => {
-                    // Ensure currentBalance is a number and non-null/undefined
-                    const balance = currentBalance !== null && typeof currentBalance === 'number' ? currentBalance : 0;
-                    console.log(`DEBUG: Current balance before transaction for game play: ${balance}`);
-                    return balance + 1; // Add 1 PKR
-                }, (error, committed, snapshot) => {
-                    if (error) {
-                        console.error('Transaction for Game Play Reward failed', error);
-                        showToast('Failed to add game play reward.', true);
-                    } else if (committed) {
-                        console.log(`DEBUG: Game Play Reward transaction committed. New balance: ${snapshot.val()}`);
-                        db.ref(`transactions/${user.uid}`).push({
-                            amount: 1,
-                            type: 'credit',
-                            currency: 'PKR', // NEW: Add currency to transaction
-                            description: 'Game Play Reward',
-                            created_at: new Date().toISOString()
-                        });
-                        showToast('🎉 You earned PKR 1 for playing!');
-                    } else {
-                        // Transaction aborted by Firebase (e.g., another client wrote to the path)
-                        console.log('DEBUG: Game Play Reward transaction aborted (not committed).');
-                    }
+                localStorage.removeItem('game_played_pending');
+                db.ref(`users/${user.uid}/wallet/PKR`).transaction(balance => (balance || 0) + 1).then(() => {
+                    db.ref(`transactions/${user.uid}`).push({ amount: 1, type: 'credit', currency: 'PKR', description: 'Game Play Reward', created_at: new Date().toISOString() });
+                    showToast('🎉 You earned PKR 1 for playing!');
                 });
             }
 
+            // Tournament game duration logic
             const activeTid = localStorage.getItem('active_tournament_id');
             if (activeTid) {
                 const startTime = parseInt(localStorage.getItem('game_start_time'));
@@ -363,23 +315,20 @@ auth.onAuthStateChanged(async user => {
                 }
             }
 
+            // Handle pending action after login (e.g., join tournament, play game)
             if (pendingAction) {
                 const { type, args } = pendingAction;
                 pendingAction = null;
                 toggleModal('authModal', false);
-                if (type === 'playGameUrl') {
-                    playGameUrl(...args);
-                } else if (type === 'joinTournament') {
-                    const dummyEvent = { preventDefault: () => { }, target: { closest: () => ({ parentElement: { querySelector: () => ({ textContent: 'Tournament' }) } }) } };
-                    joinTournament(dummyEvent, ...args);
-                }
+                if (type === 'playGameUrl') playGameUrl(...args);
+                else if (type === 'joinTournament') joinTournament({ preventDefault: () => {} }, ...args);
             }
 
-            // Check for game deletion notifications upon login/app load
-            checkAndDisplayGameDeletionNotifications(user.uid);
-
-            const initialPageId = document.querySelector('.page.active')?.id || 'homePage';
-            navigateTo(initialPageId);
+            // Updated to handle 'game_limit_reached' notifications
+            checkAndDisplayGameNotifications(user.uid);
+            
+            // Navigate to the current active page or homePage
+            navigateTo(document.querySelector('.page.active')?.id || 'homePage');
 
         } catch (error) {
             console.error("Error in onAuthStateChanged for user:", error);
@@ -388,51 +337,61 @@ auth.onAuthStateChanged(async user => {
         }
 
     } else { // User is logged out
-        // Clear global currentUserData and update UI for logged-out state
         currentUserData = null;
-        document.getElementById('header-wallet-balance').textContent = `...`; // Updated for dynamic currency
-        
-        // Hide notification badge when logged out
-        const notificationBadge = document.getElementById('unread-notifications-count');
-        if (notificationBadge) {
-            notificationBadge.style.display = 'none';
-            unreadNotificationsCount = 0;
+        document.getElementById('header-wallet-balance').textContent = `...`;
+        document.getElementById('unread-notifications-count').style.display = 'none';
+        unreadNotificationsCount = 0;
+        // Detach listener for user-submitted games on logout
+        if (userSubmittedGamesListener) {
+            db.ref('games').off('value', userSubmittedGamesListener);
+            userSubmittedGamesListener = null;
         }
-
-        navigateTo('homePage'); // Redirect to home or login page
+        navigateTo('homePage');
     }
 });
 
 /**
- * Checks for and displays any unread game deletion notifications as a persistent modal popup.
+ * Checks for and displays any unread game-related notifications (deletion, limit reached) as a persistent modal popup.
  * Marks the displayed notification as read.
  * @param {string} userId - The current user's UID.
  */
-async function checkAndDisplayGameDeletionNotifications(userId) {
+async function checkAndDisplayGameNotifications(userId) {
     if (!userId) return;
 
     const notificationsRef = db.ref(`notifications/${userId}`);
-    const snapshot = await notificationsRef.orderByChild('status').equalTo('unread').once('value');
-    const notifications = snapshot.val();
+    try {
+        const snapshot = await notificationsRef.orderByChild('status').equalTo('unread').once('value');
+        const notifications = snapshot.val();
 
-    if (notifications) {
-        for (const notificationId in notifications) {
-            const notification = notifications[notificationId];
-            if (notification.type === 'game_deletion') {
-                document.getElementById('deletion-notification-title').textContent = notification.message.split('. Reason:')[0] || 'Your game has been deleted.';
-                document.getElementById('deletion-notification-message').innerHTML = notification.message.includes('. Reason:') 
-                    ? `<strong>Reason:</strong> ${notification.message.split('. Reason:')[1]}`
-                    : 'No specific reason was provided by the admin.';
-                
-                toggleModal('gameDeletionNotificationModal', true);
-                
-                // Mark as read in Firebase
-                await notificationsRef.child(notificationId).update({ status: 'read', read_at: new Date().toISOString() });
-                
-                // Only show one deletion notification at a time, then break
-                break; 
+        if (notifications) {
+            for (const notificationId in notifications) {
+                const notification = notifications[notificationId];
+                if (notification.type === 'game_deletion' || notification.type === 'game_limit_reached') {
+                    const modalTitleEl = document.getElementById('deletion-notification-title');
+                    const modalMessageEl = document.getElementById('deletion-notification-message');
+
+                    if (notification.type === 'game_deletion') {
+                        modalTitleEl.textContent = notification.message.split('. Reason:')[0] || 'Your game has been deleted.';
+                        modalMessageEl.innerHTML = notification.message.includes('. Reason:') 
+                            ? `<strong>Reason:</strong> ${notification.message.split('. Reason:')[1]}`
+                            : 'No specific reason was provided by the admin.';
+                    } else if (notification.type === 'game_limit_reached') {
+                        modalTitleEl.textContent = 'Game Play Limit Reached!';
+                        modalMessageEl.innerHTML = `🥳 ${notification.message}<br><br>You can re-add the game with a new play limit from your profile to make it live again.`;
+                    }
+                    
+                    toggleModal('gameDeletionNotificationModal', true);
+                    
+                    // Mark as read in Firebase
+                    await notificationsRef.child(notificationId).update({ status: 'read', read_at: new Date().toISOString() });
+                    
+                    break; // Only show one notification at a time, then break
+                }
             }
         }
+    } catch (error) {
+        console.error("Error checking/displaying game notifications:", error);
+        showToast("Failed to load game notifications.", true);
     }
 }
 
@@ -443,16 +402,15 @@ async function checkAndDisplayGameDeletionNotifications(userId) {
  * @param {object} [data=null] - Optional data to pass to the rendering function.
  */
 function loadPageContent(pageId, data = null) {
-    const pageContainer = document.getElementById(pageId);
-    if (!pageContainer) return;
+    const container = document.getElementById(pageId);
+    if (!container) return;
     switch (pageId) {
-        case 'loginPage': /* container.innerHTML = ''; */ break; // loginPage is primarily handled by authModal
-        case 'homePage': renderHomePage(pageContainer); break;
-        case 'myTournamentsPage': renderMyTournamentsPage(pageContainer); break;
-        case 'walletPage': renderWalletPage(pageContainer); break;
-        case 'profilePage': renderProfilePage(pageContainer); break;
-        case 'notificationsPage': renderNotificationsPage(pageContainer); break;
-        case 'videoPlayerPage': renderVideoPlayerPage(pageContainer, data); break; // NEW: Render Video Player Page
+        case 'homePage': renderHomePage(container); break;
+        case 'myTournamentsPage': renderMyTournamentsPage(container); break;
+        case 'walletPage': renderWalletPage(container); break;
+        case 'profilePage': renderProfilePage(container); break;
+        case 'notificationsPage': renderNotificationsPage(container); break;
+        case 'videoPlayerPage': renderVideoPlayerPage(container, data); break;
     }
 }
 
@@ -486,22 +444,17 @@ function renderGameCategories() {
         return a.localeCompare(b);
     });
 
-    // Initialize displayed categories if first load or category list changed
     if (displayedCategories.length === 0 || !allCategoriesSorted.slice(0, displayedCategories.length).every((cat, i) => cat === displayedCategories[i])) {
         displayedCategories = allCategoriesSorted.slice(0, CATEGORY_CHUNK_SIZE);
-        // Reset games displayed count for all categories when categories are re-rendered
         gamesDisplayedPerCategory = {};
     }
 
     displayedCategories.forEach(category => {
         categoriesHtml += `<h3 class="col-span-2 text-xl font-bold mt-6 mb-3 text-gray-700">${escapeJsStringForHtmlAttribute(category)}</h3>`;
-        
-        // This div is just a container, the actual games grid is inside
         categoriesHtml += `<div id="category-games-${category.replace(/\s/g, '_').replace(/[^a-zA-Z0-9_]/g, '')}" class="grid grid-cols-2 gap-4 mb-4">`;
 
         const gamesInThisCategory = gamesByCategory[category];
         const currentDisplayedCount = gamesDisplayedPerCategory[category] || GAME_CHUNK_SIZE;
-        
         const gamesToDisplay = gamesInThisCategory.slice(0, currentDisplayedCount);
 
         gamesToDisplay.forEach(game => {
@@ -514,14 +467,14 @@ function renderGameCategories() {
                         </div>
                     </div>
                     <div class="p-3">
-                        <button onclick="checkLoginAndAct(event, 'playGameUrl', '${escapeJsStringForHtmlAttribute(game.game_url)}')" class="w-full text-white bg-gradient-to-r from-red-600 to-yellow-500 hover:from-red-700 hover:to-yellow-600 py-2 rounded-lg font-bold text-sm shadow-md">
+                        <button onclick="checkLoginAndAct(event, 'playGameUrl', '${escapeJsStringForHtmlAttribute(game.id)}', '${escapeJsStringForHtmlAttribute(game.game_url)}')" class="w-full text-white bg-gradient-to-r from-red-600 to-yellow-500 hover:from-red-700 hover:to-yellow-600 py-2 rounded-lg font-bold text-sm shadow-md">
                             <i class="fas fa-play mr-1"></i> PLAY NOW
                         </button>
                     </div>
                 </div>
             `;
         });
-        categoriesHtml += `</div>`; // Close grid for games
+        categoriesHtml += `</div>`;
 
         if (gamesInThisCategory.length > currentDisplayedCount) {
             categoriesHtml += `
@@ -569,7 +522,7 @@ function loadMoreGamesInCategory(category) {
     const currentDisplayedCount = gamesDisplayedPerCategory[category] || GAME_CHUNK_SIZE;
     const newCount = currentDisplayedCount + GAME_CHUNK_SIZE;
     gamesDisplayedPerCategory[category] = Math.min(newCount, gamesInThisCategory.length);
-    renderGameCategories(); // Re-render to update the specific category
+    renderGameCategories();
 }
 
 /**
@@ -580,9 +533,9 @@ function performSearch(searchTerm) {
     searchResults = allApprovedGames.filter(game =>
         game.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         game.category.toLowerCase().includes(searchTerm.toLowerCase())
-    ).sort((a, b) => a.title.localeCompare(b.title)); // Sort search results alphabetically
+    ).sort((a, b) => a.title.localeCompare(b.title));
     
-    searchGamesDisplayed = 0; // Reset display count for new search
+    searchGamesDisplayed = 0;
     displaySearchResults();
     
     document.getElementById('searchResultsContainer').classList.remove('hidden');
@@ -599,7 +552,7 @@ function displaySearchResults(loadMore = false) {
     const noSearchResults = document.getElementById('noSearchResults');
 
     if (!loadMore) {
-        searchResultsList.innerHTML = ''; // Clear previous results on new search
+        searchResultsList.innerHTML = '';
     }
 
     if (searchResults.length === 0) {
@@ -626,7 +579,7 @@ function displaySearchResults(loadMore = false) {
                     </div>
                 </div>
                 <div class="p-3">
-                    <button onclick="checkLoginAndAct(event, 'playGameUrl', '${escapeJsStringForHtmlAttribute(game.game_url)}')" class="w-full text-white bg-gradient-to-r from-red-600 to-yellow-500 hover:from-red-700 hover:to-yellow-600 py-2 rounded-lg font-bold text-sm shadow-md">
+                    <button onclick="checkLoginAndAct(event, 'playGameUrl', '${escapeJsStringForHtmlAttribute(game.id)}', '${escapeJsStringForHtmlAttribute(game.game_url)}')" class="w-full text-white bg-gradient-to-r from-red-600 to-yellow-500 hover:from-red-700 hover:to-yellow-600 py-2 rounded-lg font-bold text-sm shadow-md">
                         <i class="fas fa-play mr-1"></i> PLAY NOW
                     </button>
                 </div>
@@ -664,7 +617,6 @@ async function renderHomePage(container) {
             <div id="searchResultsContainer" class="hidden">
                 <h3 class="text-xl font-bold mb-4 text-gray-700">Search Results</h3>
                 <div id="searchResultsList" class="grid grid-cols-2 gap-4 mb-8">
-                    <!-- Search results will be loaded here -->
                 </div>
                 <div id="searchResultsMoreBtnContainer" class="text-center mb-8">
                     <button id="loadMoreSearchResults" class="bg-blue-500 text-white px-6 py-2 rounded-full font-bold hover:bg-blue-600 transition-colors hidden">Load More Games</button>
@@ -682,7 +634,7 @@ async function renderHomePage(container) {
                 </div>
             </div>
 
-            <!-- NEW: Live Event/Game Section -->
+            <!-- Live Event/Game Section -->
             <div id="live-event-section" class="mb-8">
                 <h2 class="text-xl font-bold mb-4 text-gray-700 mt-6 border-t border-orange-200 pt-4">Live Event / Game</h2>
                 <div id="live-event-content" class="bg-white p-4 rounded-xl shadow-md border border-red-100">
@@ -690,7 +642,7 @@ async function renderHomePage(container) {
                 </div>
             </div>
 
-            <!-- NEW: Video Content Sections -->
+            <!-- Video Content Sections -->
             <div id="video-content-sections" class="mb-8">
                 <h2 class="text-xl font-bold mb-4 text-gray-700 mt-6 border-t border-orange-200 pt-4">Video Content</h2>
                 <div id="video-sections-list-home" class="space-y-3">
@@ -716,8 +668,8 @@ async function renderHomePage(container) {
     searchResults = [];
     searchGamesDisplayed = 0;
 
-    // Listener for games data (real-time updates)
-    db.ref('games').on('value', snapshot => {
+    // Listener for games data (real-time updates) - ONLY FETCHES 'approved' GAMES
+    db.ref('games').orderByChild('status').equalTo('approved').on('value', snapshot => {
         const gamesData = snapshot.val();
         allApprovedGames = [];
         gamesByCategory = {};
@@ -731,18 +683,16 @@ async function renderHomePage(container) {
                 }
                 gamesByCategory[category].push({ id, ...game });
             });
-            // Sort games within each category
             for (const category in gamesByCategory) {
                 gamesByCategory[category].sort((a, b) => a.title.localeCompare(b.title));
             }
         }
         
-        // Initial render for categories (or search if input already has value)
         const currentSearchTerm = searchInput.value.trim();
         if (currentSearchTerm) {
             performSearch(currentSearchTerm);
         } else {
-            renderGameCategories(); // Initial call to render categories
+            renderGameCategories();
         }
     });
 
@@ -751,111 +701,121 @@ async function renderHomePage(container) {
         if (searchTerm.length > 0) {
             performSearch(searchTerm);
         } else {
-            // If search is cleared, hide search results and show categories
             searchResultsContainer.classList.add('hidden');
             gameCategoriesContainer.classList.remove('hidden');
-            renderGameCategories(); // Re-render categories if search is cleared
+            renderGameCategories();
         }
     });
 
-    loadMoreSearchResultsBtn.addEventListener('click', () => {
-        displaySearchResults(true); // Load more
-    });
-
-    loadMoreCategoriesBtn.addEventListener('click', () => {
-        loadMoreCategories();
-    });
+    loadMoreSearchResultsBtn.addEventListener('click', () => displaySearchResults(true));
+    loadMoreCategoriesBtn.addEventListener('click', () => loadMoreCategories());
 
     // Load Live Game Info
     const liveEventContentEl = document.getElementById('live-event-content');
-    db.ref('live_game').on('value', snap => {
-        const liveGameData = snap.val();
-        if (liveGameData && liveGameData.status !== 'inactive' && (liveGameData.title || liveGameData.url)) {
-            let statusText = '';
-            let actionButton = '';
-            if (liveGameData.status === 'live') {
-                statusText = '<span class="bg-red-500 text-white px-2 py-1 rounded-full text-xs font-semibold animate-pulse">LIVE NOW</span>';
-                actionButton = `<a href="${escapeJsStringForHtmlAttribute(liveGameData.url)}" target="_blank" rel="noopener noreferrer" class="mt-3 inline-block bg-green-500 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-green-600 transition">Watch Live <i class="fas fa-play-circle ml-1"></i></a>`;
-            } else if (liveGameData.status === 'upcoming') {
-                statusText = '<span class="bg-blue-500 text-white px-2 py-1 rounded-full text-xs font-semibold">UPCOMING</span>';
-                if (liveGameData.url) {
-                    actionButton = `<a href="${escapeJsStringForHtmlAttribute(liveGameData.url)}" target="_blank" rel="noopener noreferrer" class="mt-3 inline-block bg-blue-500 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-600 transition">View Details <i class="fas fa-info-circle ml-1"></i></a>`;
+    try {
+        db.ref('live_game').on('value', snap => {
+            const liveGameData = snap.val();
+            if (liveGameData && liveGameData.status !== 'inactive' && (liveGameData.title || liveGameData.url)) {
+                let statusText = '';
+                let actionButton = '';
+                if (liveGameData.status === 'live') {
+                    statusText = '<span class="bg-red-500 text-white px-2 py-1 rounded-full text-xs font-semibold animate-pulse">LIVE NOW</span>';
+                    actionButton = `<a href="${escapeJsStringForHtmlAttribute(liveGameData.url)}" target="_blank" rel="noopener noreferrer" class="mt-3 inline-block bg-green-500 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-green-600 transition">Watch Live <i class="fas fa-play-circle ml-1"></i></a>`;
+                } else if (liveGameData.status === 'upcoming') {
+                    statusText = '<span class="bg-blue-500 text-white px-2 py-1 rounded-full text-xs font-semibold">UPCOMING</span>';
+                    if (liveGameData.url) {
+                        actionButton = `<a href="${escapeJsStringForHtmlAttribute(liveGameData.url)}" target="_blank" rel="noopener noreferrer" class="mt-3 inline-block bg-blue-500 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-600 transition">View Details <i class="fas fa-info-circle ml-1"></i></a>`;
+                    }
                 }
+                liveEventContentEl.innerHTML = `
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="font-bold text-lg text-gray-800">${escapeJsStringForHtmlAttribute(liveGameData.title || 'Live Event')}</h3>
+                        ${statusText}
+                    </div>
+                    <p class="text-sm text-gray-600">${escapeJsStringForHtmlAttribute(liveGameData.description || 'No description available.')}</p>
+                    ${actionButton}
+                `;
+            } else {
+                liveEventContentEl.innerHTML = `<p class="text-center text-gray-500 italic py-4">No live or upcoming event information available.</p>`;
             }
-            liveEventContentEl.innerHTML = `
-                <div class="flex items-center justify-between mb-2">
-                    <h3 class="font-bold text-lg text-gray-800">${escapeJsStringForHtmlAttribute(liveGameData.title || 'Live Event')}</h3>
-                    ${statusText}
-                </div>
-                <p class="text-sm text-gray-600">${escapeJsStringForHtmlAttribute(liveGameData.description || 'No description available.')}</p>
-                ${actionButton}
-            `;
-        } else {
-            liveEventContentEl.innerHTML = `<p class="text-center text-gray-500 italic py-4">No live or upcoming event information available.</p>`;
-        }
-    });
+        });
+    } catch (error) {
+        console.error("Error loading live game info:", error);
+        liveEventContentEl.innerHTML = `<p class="text-center text-red-500 italic py-4">Error loading live event info.</p>`;
+    }
+
 
     // Load Video Content Sections
     const videoSectionsListHomeEl = document.getElementById('video-sections-list-home');
-    db.ref('video_sections').on('value', snap => {
-        const sections = snap.val();
-        if (!sections) {
-            videoSectionsListHomeEl.innerHTML = `<p class="text-center text-gray-500 italic py-4">No video content sections available yet.</p>`;
-            return;
-        }
-        let sectionsHtml = '';
-        const sectionsArray = Object.entries(sections).map(([id, section]) => ({id, ...section}));
-        sectionsArray.sort((a, b) => a.title.localeCompare(b.title)); // Sort alphabetically
+    try {
+        db.ref('video_sections').on('value', snap => {
+            const sections = snap.val();
+            if (!sections) {
+                videoSectionsListHomeEl.innerHTML = `<p class="text-center text-gray-500 italic py-4">No video content sections available yet.</p>`;
+                return;
+            }
+            let sectionsHtml = '';
+            const sectionsArray = Object.entries(sections).map(([id, section]) => ({id, ...section}));
+            sectionsArray.sort((a, b) => a.title.localeCompare(b.title));
 
-        sectionsArray.forEach(section => {
-            const safeSection = {
-                id: escapeJsStringForHtmlAttribute(section.id),
-                title: escapeJsStringForHtmlAttribute(section.title),
-                description: escapeJsStringForHtmlAttribute(section.description),
-                youtubeUrl: escapeJsStringForHtmlAttribute(section.youtubeUrl),
-                watchTimeSeconds: section.watchTimeSeconds,
-                rewardPkr: section.rewardPkr
-            };
-            sectionsHtml += `
-                <div onclick='navigateTo("videoPlayerPage", ${JSON.stringify(safeSection)})' class="bg-white p-3 rounded-xl shadow-sm border border-green-100 flex items-center justify-between cursor-pointer hover:bg-green-50 transition-colors">
-                    <div>
-                        <h4 class="font-bold text-gray-800">${safeSection.title}</h4>
-                        <p class="text-sm text-gray-600">${safeSection.description || 'No description'}</p>
+            sectionsArray.forEach(section => {
+                const safeSection = {
+                    id: escapeJsStringForHtmlAttribute(section.id),
+                    title: escapeJsStringForHtmlAttribute(section.title),
+                    description: escapeJsStringForHtmlAttribute(section.description),
+                    youtubeUrl: escapeJsStringForHtmlAttribute(section.youtubeUrl),
+                    watchTimeSeconds: section.watchTimeSeconds,
+                    rewardPkr: section.rewardPkr
+                };
+                sectionsHtml += `
+                    <div onclick='navigateTo("videoPlayerPage", ${JSON.stringify(safeSection)})' class="bg-white p-3 rounded-xl shadow-sm border border-green-100 flex items-center justify-between cursor-pointer hover:bg-green-50 transition-colors">
+                        <div>
+                            <h4 class="font-bold text-gray-800">${safeSection.title}</h4>
+                            <p class="text-sm text-gray-600">${safeSection.description || 'No description'}</p>
+                        </div>
+                        <i class="fas fa-chevron-right text-gray-400"></i>
                     </div>
-                    <i class="fas fa-chevron-right text-gray-400"></i>
-                </div>
-            `;
+                `;
+            });
+            videoSectionsListHomeEl.innerHTML = sectionsHtml;
         });
-        videoSectionsListHomeEl.innerHTML = sectionsHtml;
-    });
+    } catch (error) {
+        console.error("Error loading video sections:", error);
+        videoSectionsListHomeEl.innerHTML = `<p class="text-center text-red-500 italic py-4">Error loading video content.</p>`;
+    }
 
 
     const listEl = document.getElementById('tournament-list');
     listEl.innerHTML = `<div class="text-center py-10"><i class="fas fa-spinner fa-spin fa-2x text-red-500"></i></div>`;
 
-    const tournaments = (await db.ref('tournaments').orderByChild('status').equalTo('Upcoming').once('value')).val();
-    if (!tournaments) {
-        listEl.innerHTML = `<div class="text-center text-gray-400 py-8"><p>No upcoming tournaments.</p></div>`;
-    } else {
-        listEl.innerHTML = Object.entries(tournaments).map(([id, t]) => {
-            const isUserLoggedIn = auth.currentUser;
-            const buttonText = isUserLoggedIn ? 'Join Match' : 'Login to Join';
-            const buttonAction = isUserLoggedIn ? `joinTournament(event, '${escapeJsStringForHtmlAttribute(id)}', ${t.entry_fee})` : `checkLoginAndAct(event, 'joinTournament', '${escapeJsStringForHtmlAttribute(id)}', ${t.entry_fee})`;
+    try {
+        const tournaments = (await db.ref('tournaments').orderByChild('status').equalTo('Upcoming').once('value')).val();
+        if (!tournaments) {
+            listEl.innerHTML = `<div class="text-center text-gray-400 py-8"><p>No upcoming tournaments.</p></div>`;
+        } else {
+            listEl.innerHTML = Object.entries(tournaments).map(([id, t]) => {
+                const isUserLoggedIn = auth.currentUser;
+                const buttonText = isUserLoggedIn ? 'Join Match' : 'Login to Join';
+                const buttonAction = isUserLoggedIn ? `joinTournament(event, '${escapeJsStringForHtmlAttribute(id)}', ${t.entry_fee})` : `checkLoginAndAct(event, 'joinTournament', '${escapeJsStringForHtmlAttribute(id)}', ${t.entry_fee})`;
 
-            return `
-                        <div class="bg-gradient-to-br from-red-50 to-yellow-50 rounded-xl shadow-md border border-red-100 overflow-hidden">
-                            <div class="p-4 flex justify-between items-start border-b border-red-100/50">
-                                <div><h3 class="font-bold text-lg text-red-900">${t.title}</h3><span class="text-xs font-bold text-white bg-gradient-to-r from-red-500 to-orange-500 px-3 py-1 rounded-full shadow-sm">${formatCurrency(t.prize_pool, 'PKR')} Pool</span>
-                            </div>
-                            <div class="p-4 grid grid-cols-2 gap-4 text-sm">
-                                <div class="bg-white/60 p-2 rounded border border-red-100"><p class="text-gray-500 text-xs">Entry Fee</p><p class="font-bold text-gray-800">${formatCurrency(t.entry_fee, 'PKR')}</p></div>
-                                <div class="bg-white/60 p-2 rounded border border-red-100"><p class="text-gray-500 text-xs">Time</p><p class="font-bold text-gray-800">${new Date(t.match_time).toLocaleDateString()}</p></div>
-                            </div>
-                            <div class="p-3">
-                                <button onclick="${buttonAction}" class="w-full text-white bg-gradient-to-r from-red-600 to-orange-500 font-bold py-2 rounded-lg shadow-lg hover:shadow-lg transition">${buttonText}</button>
-                            </div>
-                        </div>`;
-        }).join('');
+                return `
+                            <div class="bg-gradient-to-br from-red-50 to-yellow-50 rounded-xl shadow-md border border-red-100 overflow-hidden">
+                                <div class="p-4 flex justify-between items-start border-b border-red-100/50">
+                                    <div><h3 class="font-bold text-lg text-red-900">${t.title}</h3><span class="text-xs font-bold text-white bg-gradient-to-r from-red-500 to-orange-500 px-3 py-1 rounded-full shadow-sm">${formatCurrency(t.prize_pool, 'PKR')} Pool</span>
+                                </div>
+                                <div class="p-4 grid grid-cols-2 gap-4 text-sm">
+                                    <div class="bg-white/60 p-2 rounded border border-red-100"><p class="text-gray-500 text-xs">Entry Fee</p><p class="font-bold text-gray-800">${formatCurrency(t.entry_fee, 'PKR')}</p></div>
+                                    <div class="bg-white/60 p-2 rounded border border-red-100"><p class="text-gray-500 text-xs">Time</p><p class="font-bold text-gray-800">${new Date(t.match_time).toLocaleDateString()}</p></div>
+                                </div>
+                                <div class="p-3">
+                                    <button onclick="${buttonAction}" class="w-full text-white bg-gradient-to-r from-red-600 to-orange-500 font-bold py-2 rounded-lg shadow-lg hover:shadow-lg transition">${buttonText}</button>
+                                </div>
+                            </div>`;
+            }).join('');
+        }
+    } catch (error) {
+        console.error("Error loading tournaments:", error);
+        listEl.innerHTML = `<p class="text-center text-red-500 italic py-8">Error loading tournaments.</p>`;
     }
 }
 
@@ -954,7 +914,6 @@ function startVideoRewardTimer(totalSeconds, rewardPkr, videoId, videoTitle, sec
 
     if (!timerDisplay || !progressBar || !statusContainer) return;
 
-    // Clear any existing timer
     if (videoRewardTimer) clearInterval(videoRewardTimer);
 
     videoRewardTimer = setInterval(async () => {
@@ -986,7 +945,6 @@ async function claimVideoReward(rewardPkr, videoId, videoTitle, sectionTitle, st
     if (!user) return;
 
     try {
-        // 1. Check if already claimed
         const logRef = db.ref(`video_watch_logs/${user.uid}/${videoId}`);
         const logSnap = await logRef.once('value');
         
@@ -995,8 +953,7 @@ async function claimVideoReward(rewardPkr, videoId, videoTitle, sectionTitle, st
             return;
         }
 
-        // 2. Add funds via transaction
-        const walletPKRRef = db.ref(`users/${user.uid}/wallet/PKR`); // NEW: Target PKR wallet
+        const walletPKRRef = db.ref(`users/${user.uid}/wallet/PKR`);
         let committed = false;
         
         await walletPKRRef.transaction(currentBalance => {
@@ -1009,16 +966,14 @@ async function claimVideoReward(rewardPkr, videoId, videoTitle, sectionTitle, st
             } else if (_committed) {
                 committed = true;
                 
-                // 3. Log to transactions
                 await db.ref(`transactions/${user.uid}`).push({
                     amount: rewardPkr,
                     type: 'credit',
-                    currency: 'PKR', // NEW: Add currency
+                    currency: 'PKR',
                     description: `Video Reward: ${videoTitle}`,
                     created_at: new Date().toISOString()
                 });
 
-                // 4. Log to video_watch_logs
                 await logRef.set({
                     videoTitle: videoTitle,
                     sectionTitle: sectionTitle,
@@ -1030,9 +985,8 @@ async function claimVideoReward(rewardPkr, videoId, videoTitle, sectionTitle, st
                 statusContainer.innerHTML = `<p class="font-bold text-green-400 text-xl animate-pulse"><i class="fas fa-gift mr-2 text-yellow-400"></i>${formatCurrency(rewardPkr, 'PKR')} added to wallet!</p>`;
                 showToast(`🎉 You earned ${formatCurrency(rewardPkr, 'PKR')} for watching!`);
                 
-                // Force UI update
                 if (currentUserData) {
-                    currentUserData.wallet.PKR = snapshot.val(); // NEW: Update specific currency
+                    currentUserData.wallet.PKR = snapshot.val();
                     const headerWalletBalanceEl = document.getElementById('header-wallet-balance');
                     if (headerWalletBalanceEl) headerWalletBalanceEl.textContent = getFormattedBalance();
                 }
@@ -1049,21 +1003,57 @@ async function claimVideoReward(rewardPkr, videoId, videoTitle, sectionTitle, st
 
 
 /**
- * Initiates playing a game URL, optionally as part of a tournament.
+ * Initiates playing a game URL, optionally as part of a tournament, and handles play count logic for regular games.
+ * @param {string} gameId - The ID of the game from the database (relevant for non-tournament games).
  * @param {string} url - The URL of the game.
  * @param {string} [tournamentId=null] - The ID of the tournament, if applicable.
  */
-function playGameUrl(url, tournamentId = null) {
+async function playGameUrl(gameId, url, tournamentId = null) {
     if (!auth.currentUser) {
         return showToast('Login required to play!', true);
     }
     if (!url) return showToast("Game URL missing!", true);
+    if (!currentUserData || currentUserData.locked) { 
+        auth.signOut();
+        const lockReason = currentUserData?.lockReason ? `Reason: ${currentUserData.lockReason}` : '';
+        return showToast(`Your account is locked. Please contact support. ${lockReason}`, true);
+    }
+
+    // Logic for non-tournament, limited-play games
+    if (gameId && !tournamentId) { // Only apply this logic for standalone games, not tournament games
+        const gameRef = db.ref(`games/${gameId}`);
+        try {
+            const { committed } = await gameRef.transaction(gameData => {
+                if (gameData && gameData.status === 'approved' && typeof gameData.play_limit === 'number') {
+                    gameData.play_count = (gameData.play_count || 0) + 1;
+                    
+                    if (gameData.play_limit !== 0 && gameData.play_count >= gameData.play_limit) { // Only set to completed if limit is not 0
+                        gameData.status = 'completed';
+                        // `notified_play_limit_reached` is set to false here initially, the listener in onAuthStateChanged
+                        // will send the notification and then set this flag to true.
+                        gameData.notified_play_limit_reached = false; 
+                    }
+                    return gameData;
+                }
+                return;
+            });
+
+            if (!committed) {
+                showToast("This game is no longer available or its play limit has been reached.", true);
+                renderHomePage(document.getElementById('homePage'));
+                return;
+            }
+            localStorage.setItem('game_played_pending', 'true');
+        } catch (error) {
+            console.error("Error updating play count for game:", error);
+            showToast("Could not record your play due to an error. Please try again.", true);
+            return;
+        }
+    }
 
     if (tournamentId) {
         localStorage.setItem('active_tournament_id', tournamentId);
         localStorage.setItem('game_start_time', Date.now());
-    } else { // Set flag for non-tournament game play reward
-        localStorage.setItem('game_played_pending', 'true');
     }
     window.location.href = url;
 }
@@ -1073,7 +1063,6 @@ function playGameUrl(url, tournamentId = null) {
  * @param {HTMLElement} container - The container element for the wallet page.
  */
 async function renderWalletPage(container) {
-    // Check for auth.currentUser, not currentUserData, for initial login state
     if (!auth.currentUser) {
         container.innerHTML = `
             <div class="p-4 bg-orange-50 min-h-screen flex flex-col items-center justify-center text-center">
@@ -1138,25 +1127,16 @@ async function renderWalletPage(container) {
                 </div>
             </div>`;
 
-    // Initialize Swiper after injecting HTML
     new Swiper(".walletSwiper", {
-        spaceBetween: 0,
-        centeredSlides: true,
-        autoplay: {
-            delay: 3000, // Auto scroll every 3 seconds
-            disableOnInteraction: false,
-        },
-        pagination: {
-            el: ".swiper-pagination",
-            clickable: true,
-        },
+        spaceBetween: 0, centeredSlides: true, autoplay: { delay: 3000, disableOnInteraction: false }, pagination: { el: ".swiper-pagination", clickable: true }
     });
 
     const listEl = document.getElementById('transaction-list');
     listEl.innerHTML = `<p class="text-center text-gray-400 py-8 italic">Loading transactions...</p>`;
 
-    const transactionsRef = db.ref(`transactions/${currentUserData.uid}`).orderByChild('created_at').limitToLast(20);
-    transactionsRef.once('value').then(transactionsSnap => {
+    try {
+        const transactionsRef = db.ref(`transactions/${currentUserData.uid}`).orderByChild('created_at').limitToLast(20);
+        const transactionsSnap = await transactionsRef.once('value');
         let allRecords = [];
 
         transactionsSnap.forEach(childSnap => {
@@ -1172,7 +1152,7 @@ async function renderWalletPage(container) {
 
         listEl.innerHTML = allRecords.map(t => {
             let bgColorClass, borderColorClass, amountClass, descriptionText, icon = '';
-            const transactionCurrency = t.currency || 'PKR'; // Default to PKR
+            const transactionCurrency = t.currency || 'PKR';
 
             if (t.type === 'credit') {
                 bgColorClass = 'bg-green-50'; borderColorClass = 'border-green-200'; amountClass = 'text-green-600'; icon = '<i class="fas fa-arrow-up mr-2"></i>';
@@ -1197,10 +1177,10 @@ async function renderWalletPage(container) {
                     </p>
                 </div>`;
         }).join('');
-    }).catch(error => {
+    } catch (error) {
         console.error("Error fetching transactions:", error);
         listEl.innerHTML = `<p class="text-center text-red-400 py-8 italic">Error loading transactions.</p>`;
-    });
+    }
 }
 
 
@@ -1224,38 +1204,43 @@ async function renderMyTournamentsPage(container) {
     container.innerHTML = `<div class="p-4 bg-orange-50 min-h-screen"><h2 class="text-2xl font-black mb-4 text-gray-800">My Matches</h2><div class="flex border-b border-gray-300 mb-4"><button id="upcomingLiveTab" class="flex-1 py-2 text-center font-bold border-b-4 border-red-500 text-red-600">Upcoming/Live</button><button id="completedTab" class="flex-1 py-2 text-center font-bold text-gray-400 border-b-4 border-transparent">Completed</button></div><div id="upcomingLiveContent" class="space-y-4"></div><div id="completedContent" class="space-y-4" style="display:none;"></div></div>`;
     attachMyTournamentsListeners();
 
-    const allTournaments = (await db.ref('tournaments').once('value')).val() || {};
-    let upcomingHtml = '', completedHtml = '', hasUpcoming = false, hasCompleted = false;
-    for (const tId in allTournaments) {
-        // Ensure currentUserData exists and has uid before attempting to read participants
-        if (!currentUserData || !currentUserData.uid) {
-            console.warn("currentUserData or UID missing in renderMyTournamentsPage, skipping participant check.");
-            continue;
-        }
-        const participant = (await db.ref(`participants/${tId}/${currentUserData.uid}`).once('value')).val();
-        if (participant) {
-            const t = allTournaments[tId];
-            if (t.status !== 'Completed') {
-                hasUpcoming = true;
-                upcomingHtml += `<div class="bg-white border-l-4 border-red-500 rounded-lg p-4 shadow-md">
-                            <div class="flex justify-between items-center mb-2"><h3 class="font-bold text-lg text-gray-800">${escapeJsStringForHtmlAttribute(t.title)}</h3><span class="text-xs font-bold ${t.status === 'Live' ? 'text-white bg-red-600 animate-pulse' : 'text-yellow-800 bg-yellow-200'} px-2 py-1 rounded-full">${t.status}</span></div>
-                            <p class="text-sm text-gray-500 mb-2">${escapeJsStringForHtmlAttribute(t.game_name)}</p>
-                            ${t.status === 'Live' ? `
-                                ${t.room_id ? `<div class="bg-gray-100 p-3 rounded text-sm mb-3"><p><span class="font-bold text-gray-600">Room ID:</span> ${escapeJsStringForHtmlAttribute(t.room_id)}</p><p><span class="font-bold text-gray-600">Pass:</span> ${escapeJsStringForHtmlAttribute(t.room_password)}</p></div>` : ''}
-                                <button onclick="checkLoginAndAct(event, 'playGameUrl', '${escapeJsStringForHtmlAttribute(t.game_url)}', '${escapeJsStringForHtmlAttribute(tId)}')" class="w-full text-white bg-gradient-to-r from-green-500 to-green-600 font-bold py-3 rounded-lg shadow-lg hover:shadow-xl transition transform active:scale-95 animate-pulse">PLAY LIVE MATCH</button>
-                            ` : `<p class="text-xs text-gray-400 italic mb-3">Room details appear here when Live.</p>`}
-                        </div>`;
-            } else {
-                hasCompleted = true;
-                completedHtml += `<div class="bg-gray-100 border border-gray-200 rounded-lg p-4 flex justify-between items-center shadow-sm opacity-80">
-                            <div><h3 class="font-bold text-gray-700">${escapeJsStringForHtmlAttribute(t.title)}</h3><p class="text-xs text-gray-500">${new Date(t.match_time).toLocaleDateString()}</p></div>
-                            <span class="font-bold ${participant.status === 'Winner' ? 'text-green-600' : 'text-gray-500'}">${participant.status || 'Played'}</span>
-                        </div>`;
+    try {
+        const allTournaments = (await db.ref('tournaments').once('value')).val() || {};
+        let upcomingHtml = '', completedHtml = '', hasUpcoming = false, hasCompleted = false;
+        for (const tId in allTournaments) {
+            if (!currentUserData || !currentUserData.uid) {
+                console.warn("currentUserData or UID missing in renderMyTournamentsPage, skipping participant check.");
+                continue;
+            }
+            const participant = (await db.ref(`participants/${tId}/${currentUserData.uid}`).once('value')).val();
+            if (participant) {
+                const t = allTournaments[tId];
+                if (t.status !== 'Completed') {
+                    hasUpcoming = true;
+                    upcomingHtml += `<div class="bg-white border-l-4 border-red-500 rounded-lg p-4 shadow-md">
+                                <div class="flex justify-between items-center mb-2"><h3 class="font-bold text-lg text-gray-800">${escapeJsStringForHtmlAttribute(t.title)}</h3><span class="text-xs font-bold ${t.status === 'Live' ? 'text-white bg-red-600 animate-pulse' : 'text-yellow-800 bg-yellow-200'} px-2 py-1 rounded-full">${t.status}</span></div>
+                                <p class="text-sm text-gray-500 mb-2">${escapeJsStringForHtmlAttribute(t.game_name)}</p>
+                                ${t.status === 'Live' ? `
+                                    ${t.room_id ? `<div class="bg-gray-100 p-3 rounded text-sm mb-3"><p><span class="font-bold text-gray-600">Room ID:</span> ${escapeJsStringForHtmlAttribute(t.room_id)}</p><p><span class="font-bold text-gray-600">Pass:</span> ${escapeJsStringForHtmlAttribute(t.room_password)}</p></div>` : ''}
+                                    <button onclick="checkLoginAndAct(event, 'playGameUrl', null, '${escapeJsStringForHtmlAttribute(t.game_url)}', '${escapeJsStringForHtmlAttribute(tId)}')" class="w-full text-white bg-gradient-to-r from-green-500 to-green-600 font-bold py-3 rounded-lg shadow-lg hover:shadow-xl transition transform active:scale-95 animate-pulse">PLAY LIVE MATCH</button>
+                                ` : `<p class="text-xs text-gray-400 italic mb-3">Room details appear here when Live.</p>`}
+                            </div>`;
+                } else {
+                    hasCompleted = true;
+                    completedHtml += `<div class="bg-gray-100 border border-gray-200 rounded-lg p-4 flex justify-between items-center shadow-sm opacity-80">
+                                <div><h3 class="font-bold text-gray-700">${escapeJsStringForHtmlAttribute(t.title)}</h3><p class="text-xs text-gray-500">${new Date(t.match_time).toLocaleDateString()}</p></div>
+                                <span class="font-bold ${participant.status === 'Winner' ? 'text-green-600' : 'text-gray-500'}">${participant.status || 'Played'}</span>
+                            </div>`;
+                }
             }
         }
+        document.getElementById('upcomingLiveContent').innerHTML = hasUpcoming ? upcomingHtml : `<p class="text-center text-gray-500 py-8">No matches joined.</p>`;
+        document.getElementById('completedContent').innerHTML = hasCompleted ? completedHtml : `<p class="text-center text-gray-500 py-8">No history available.</p>`;
+    } catch (error) {
+        console.error("Error loading my tournaments:", error);
+        document.getElementById('upcomingLiveContent').innerHTML = `<p class="text-center text-red-500 italic py-8">Error loading matches.</p>`;
+        document.getElementById('completedContent').innerHTML = `<p class="text-center text-red-500 italic py-8">Error loading matches history.</p>`;
     }
-    document.getElementById('upcomingLiveContent').innerHTML = hasUpcoming ? upcomingHtml : `<p class="text-center text-gray-500 py-8">No matches joined.</p>`;
-    document.getElementById('completedContent').innerHTML = hasCompleted ? completedHtml : `<p class="text-center text-gray-500 py-8">No history available.</p>`;
 }
 
 /**
@@ -1291,36 +1276,39 @@ async function renderNotificationsPage(container) {
     const listEl = document.getElementById('notifications-list');
     const userId = auth.currentUser.uid;
 
-    // Listen for real-time updates to notifications
-    db.ref(`notifications/${userId}`).orderByChild('timestamp').on('value', snapshot => {
-        const notificationsData = snapshot.val();
-        if (!notificationsData) {
-            listEl.innerHTML = `<p class="text-center text-gray-400 italic">No notifications yet.</p>`;
-            return;
-        }
+    try {
+        db.ref(`notifications/${userId}`).orderByChild('timestamp').on('value', snapshot => {
+            const notificationsData = snapshot.val();
+            if (!notificationsData) {
+                listEl.innerHTML = `<p class="text-center text-gray-400 italic">No notifications yet.</p>`;
+                return;
+            }
 
-        const notificationsArray = [];
-        for (const id in notificationsData) {
-            notificationsArray.push({ id, ...notificationsData[id] });
-        }
+            const notificationsArray = [];
+            for (const id in notificationsData) {
+                notificationsArray.push({ id, ...notificationsData[id] });
+            }
 
-        // Sort by timestamp (latest first)
-        notificationsArray.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            notificationsArray.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-        listEl.innerHTML = notificationsArray.map(notif => {
-            const isUnread = notif.status === 'unread';
-            const itemClass = isUnread ? 'notification-item unread' : 'notification-item';
-            const timeAgo = formatTimeAgo(notif.timestamp);
+            listEl.innerHTML = notificationsArray.map(notif => {
+                const isUnread = notif.status === 'unread';
+                const itemClass = isUnread ? 'notification-item unread' : 'notification-item';
+                const timeAgo = formatTimeAgo(notif.timestamp);
 
-            return `
-                <div class="${itemClass} p-4 rounded-xl shadow-sm border border-orange-100 cursor-pointer" onclick="markNotificationAsRead('${escapeJsStringForHtmlAttribute(notif.id)}')">
-                    <h3 class="font-bold text-gray-800">${escapeJsStringForHtmlAttribute(notif.title || 'Notification')}</h3>
-                    <p class="text-sm text-gray-600 mt-1">${escapeJsStringForHtmlAttribute(notif.message)}</p>
-                    <p class="text-xs text-gray-500 mt-2">${timeAgo}</p>
-                </div>
-            `;
-        }).join('');
-    });
+                return `
+                    <div class="${itemClass} p-4 rounded-xl shadow-sm border border-orange-100 cursor-pointer" onclick="markNotificationAsRead('${escapeJsStringForHtmlAttribute(notif.id)}')">
+                        <h3 class="font-bold text-gray-800">${escapeJsStringForHtmlAttribute(notif.title || 'Notification')}</h3>
+                        <p class="text-sm text-gray-600 mt-1">${escapeJsStringForHtmlAttribute(notif.message)}</p>
+                        <p class="text-xs text-gray-500 mt-2">${timeAgo}</p>
+                    </div>
+                `;
+            }).join('');
+        });
+    } catch (error) {
+        console.error("Error loading notifications:", error);
+        listEl.innerHTML = `<p class="text-center text-red-500 italic py-8">Error loading notifications.</p>`;
+    }
 }
 
 /**
@@ -1352,7 +1340,6 @@ async function markNotificationAsRead(notificationId) {
     if (!auth.currentUser || !notificationId) return;
     try {
         await db.ref(`notifications/${auth.currentUser.uid}/${notificationId}`).update({ status: 'read', read_at: new Date().toISOString() });
-        // UI will update automatically due to real-time listener
     } catch (error) {
         console.error("Error marking notification as read:", error);
         showToast('Failed to mark notification as read.', true);
@@ -1401,11 +1388,11 @@ function renderProfilePage(container) {
         return;
     }
 
-    // Ensure currentUserData is initialized before accessing properties
     const userReferralCode = currentUserData?.username || '';
     const referralsEarned = currentUserData?.referrals_earned_count || 0;
     const preferredCurrency = currentUserData?.preferred_currency || 'PKR';
 
+    // Updated HTML structure for "My Submitted Games" to be a details/summary accordion
     container.innerHTML = `
                 <div class="p-4 space-y-6 bg-orange-50 min-h-screen">
                     <h2 class="text-2xl font-black mb-4 text-gray-800">Profile & Settings</h2>
@@ -1423,7 +1410,7 @@ function renderProfilePage(container) {
                             </div>
                         </div>
 
-                        <!-- NEW: Wallet Settings -->
+                        <!-- Wallet Settings -->
                         <div class="bg-white border border-orange-100 p-6 rounded-xl shadow-md space-y-4">
                             <h3 class="font-bold text-lg text-gray-800">My Wallet Settings</h3>
                             <label class="block"><span class="text-gray-700 text-sm">Preferred Display Currency:</span>
@@ -1436,7 +1423,7 @@ function renderProfilePage(container) {
                             <p class="text-xs text-gray-500 italic mt-1">This sets the default currency displayed in your wallet and header.</p>
                         </div>
                         
-                        <!-- Referral Code Section (Updated) -->
+                        <!-- Referral Code Section -->
                         <div class="bg-white border border-orange-100 p-6 rounded-xl shadow-md space-y-4">
                             <h3 class="font-bold text-lg text-gray-800">Invite Friends & Earn!</h3>
                             <p class="text-sm text-gray-600">Share your username as referral code. You get <span class="font-bold text-green-600">PKR  <span id="referral-bonus-text">${referralBonusAmount}</span></span> for every friend who signs up!</p>
@@ -1470,6 +1457,17 @@ function renderProfilePage(container) {
                         <button onclick="toggleModal('addGameModal', true)" class="w-full bg-gradient-to-r from-orange-500 to-yellow-500 text-white p-3 rounded-xl font-bold shadow-md hover:from-orange-600 hover:to-yellow-600 transition">
                             <i class="fas fa-plus-circle mr-2"></i> Add New Game
                         </button>
+
+                        <!-- My Submitted Games Section as an accordion -->
+                        <details class="submitted-games-accordion bg-white p-3 rounded-xl shadow-md border border-orange-100">
+                            <summary class="flex items-center justify-between text-gray-800 font-bold">
+                                <span><i class="fas fa-gamepad mr-3 text-red-500"></i>My Submitted Games</span>
+                            </summary>
+                            <div id="my-submitted-games-list" class="space-y-3 mt-4">
+                                <p class="text-center text-gray-400 italic">Loading your games...</p>
+                            </div>
+                        </details>
+                        <!-- End My Submitted Games Section -->
 
                         <!-- Reset Password Button -->
                         <button onclick="changePassword()" class="w-full bg-white text-gray-700 border border-gray-300 p-3 rounded-xl font-bold shadow-sm">Reset Password</button>
@@ -1521,110 +1519,103 @@ function renderProfilePage(container) {
                     </div>
                 </div>`;
     
-    // Attach listener for preferred currency change
     document.getElementById('preferred-currency-select').addEventListener('change', updateUserPreferredCurrency);
     updateProfileContent();
+    renderMySubmittedGames(); // Call the function to populate the submitted games list
 }
 
 /**
- * Shows a specific policy section by hiding the main profile view.
- * @param {string} contentKey - The key for the policy content in Firebase.
+ * Renders the list of games submitted by the current user with their play counts.
  */
-function showPolicySection(contentKey) {
-    document.getElementById('mainProfileView').style.display = 'none';
-    document.getElementById('policyContentArea').style.display = 'block';
-
-    document.getElementById('policy-content-display').style.display = 'none';
-    document.getElementById('mySupportMessagesSection').style.display = 'none';
-
-    document.getElementById('policy-content-display').style.display = 'block';
-
-    db.ref(`app_content/${contentKey}`).once('value').then(contentSnap => {
-        const contentData = contentSnap.val();
-        if (contentData) {
-            document.getElementById('policy-display-title').textContent = contentData.displayTitle;
-            document.getElementById('policy-display-body').innerHTML = contentData.body.replace(/\n/g, '<br>');
-        } else {
-            document.getElementById('policy-display-title').textContent = 'Content Not Found';
-            document.getElementById('policy-display-body').textContent = 'The requested content is not available. Please contact support.';
-        }
-        window.scrollTo(0, 0);
-    }).catch(error => {
-        console.error("Error fetching policy content:", error);
-        showToast("Failed to load policy content.", true);
-    });
-}
-
-/**
- * Displays the user's support messages.
- */
-async function showMySupportMessages() {
-    document.getElementById('mainProfileView').style.display = 'none';
-    document.getElementById('policyContentArea').style.display = 'block';
-
-    document.getElementById('policy-content-display').style.display = 'none';
-
-    document.getElementById('mySupportMessagesSection').style.display = 'block';
-
-    const listEl = document.getElementById('user-contact-messages-list');
-    listEl.innerHTML = `<p class="text-center text-gray-400 italic">Loading your messages...</p>`;
-
-    if (!auth.currentUser) {
-        listEl.innerHTML = `<p class="text-center text-red-500 italic">Login required to view messages.</p>`;
+function renderMySubmittedGames() {
+    const listEl = document.getElementById('my-submitted-games-list');
+    if (!auth.currentUser || !listEl) {
+        listEl.innerHTML = `<p class="text-center text-gray-500 italic">Login to view your submitted games.</p>`;
         return;
     }
 
-    db.ref('contact_messages').orderByChild('userId').equalTo(auth.currentUser.uid).on('value', snap => {
-        const messages = snap.val();
-
-        if (!messages) {
-            listEl.innerHTML = `<p class="text-center text-gray-400 italic">You have not sent any messages yet.</p>`;
+    const userId = auth.currentUser.uid;
+    // We use .on() here to get real-time updates for play_count and status changes in the profile view
+    // This listener is separate from the global userSubmittedGamesListener, this one is for rendering.
+    // It should *not* be async on its own, as it's a callback for a real-time event.
+    db.ref('games').orderByChild('created_by').equalTo(userId).on('value', snapshot => {
+        const gamesData = snapshot.val();
+        if (!gamesData) {
+            listEl.innerHTML = `<p class="text-center text-gray-500 italic">You have not submitted any games yet.</p>`;
             return;
         }
 
-        let messagesHtml = '';
-        const messageArray = Object.entries(messages).map(([id, msg]) => ({id, ...msg}));
-        messageArray.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        const submittedGames = [];
+        for (const gameId in gamesData) {
+            const game = gamesData[gameId];
+            // Show all statuses: 'approved', 'completed', 'pending' for user to manage
+            if (game.status === 'approved' || game.status === 'completed' || game.status === 'pending') { 
+                submittedGames.push({ id: gameId, ...game });
+            }
+        }
 
-        for (const msg of messageArray) {
-            const statusClass = msg.status === 'pending' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700';
-            const icon = msg.status === 'pending' ? 'fas fa-hourglass-half' : 'fas fa-check-circle';
-            const adminReplyHtml = msg.adminReply
-                ? `<div class="bg-blue-50 p-2 rounded-md mt-2 text-sm border border-blue-200"><strong class="text-blue-700">Admin Reply:</strong> ${escapeJsStringForHtmlAttribute(msg.adminReply).replace(/\n/g, '<br>')}</div>`
-                : `<p class="text-xs text-gray-500 italic mt-2">Admin has not replied yet.</p>`;
+        if (submittedGames.length === 0) {
+            listEl.innerHTML = `<p class="text-center text-gray-500 italic">You have no active games. Games appear here once approved by admin.</p>`;
+            return;
+        }
+        
+        submittedGames.sort((a, b) => a.title.localeCompare(b.title));
 
-            messagesHtml += `
-                <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-                    <div class="flex justify-between items-center mb-2">
-                        <p class="font-bold text-gray-800">${escapeJsStringForHtmlAttribute(msg.subject)}</p>
-                        <span class="text-xs font-semibold px-2 py-1 rounded-full ${statusClass}"><i class="${icon} mr-1"></i>${status.toUpperCase()}</span>
+        listEl.innerHTML = submittedGames.map(game => {
+            const currentPlays = game.play_count || 0;
+            const playLimit = game.play_limit || 0;
+            const progressPercentage = playLimit > 0 ? Math.min((currentPlays / playLimit) * 100, 100) : 0; // Cap at 100%
+
+            let gameStatusText;
+            let statusColorClass;
+            switch (game.status) {
+                case 'approved':
+                    gameStatusText = 'Live';
+                    statusColorClass = 'text-green-600 bg-green-100';
+                    break;
+                case 'completed':
+                    gameStatusText = 'Limit Reached';
+                    statusColorClass = 'text-red-600 bg-red-100';
+                    break;
+                case 'pending':
+                    gameStatusText = 'Pending Approval';
+                    statusColorClass = 'text-yellow-600 bg-yellow-100';
+                    break;
+                case 'rejected':
+                    gameStatusText = 'Rejected (Refunded)'; // Changed to reflect refund
+                    statusColorClass = 'text-red-800 bg-gray-200';
+                    break;
+                default:
+                    gameStatusText = 'Unknown';
+                    statusColorClass = 'text-gray-600 bg-gray-100';
+            }
+            
+            // The "Re-add Game" button should only appear if status is 'completed'
+            const reAddButton = game.status === 'completed' 
+                ? `<button onclick="toggleModal('addGameModal', true)" class="text-white bg-blue-500 hover:bg-blue-600 py-1 px-3 rounded-md text-xs font-semibold mt-2">Re-add Game</button>`
+                : '';
+
+            return `
+                <div class="bg-gray-50 p-3 rounded-lg border border-gray-200 shadow-sm">
+                    <div class="flex justify-between items-center mb-1">
+                        <p class="font-semibold text-gray-800">${escapeJsStringForHtmlAttribute(game.title)}</p>
+                        <span class="text-xs font-bold px-2 py-0.5 rounded-full ${statusColorClass}">${gameStatusText}</span>
                     </div>
-                    <p class="text-sm text-gray-600">Message: <span class="block mt-1 bg-gray-50 p-2 rounded text-xs">${escapeJsStringForHtmlAttribute(msg.message).replace(/\n/g, '<br>')}</span></p>
-                    ${adminReplyHtml}
-                    <p class="text-xs text-gray-400 mt-2">Sent: ${new Date(msg.timestamp).toLocaleString()}</p>
+                    <div class="w-full bg-gray-200 rounded-full h-2.5 mt-1">
+                        <div class="bg-gradient-to-r from-red-500 to-yellow-500 h-2.5 rounded-full" style="width: ${progressPercentage}%"></div>
+                    </div>
+                    <p class="text-xs text-right text-gray-600 mt-1 font-mono">Plays: <strong class="font-bold">${currentPlays}</strong> / ${playLimit === 0 ? 'Unlimited' : playLimit}</p>
+                    ${reAddButton}
                 </div>
             `;
-        }
-        listEl.innerHTML = messagesHtml;
+        }).join('');
+    }, (error) => {
+        console.error("Error loading user's submitted games:", error);
+        listEl.innerHTML = `<p class="text-center text-red-500 italic py-8">Error loading your games.</p>`;
     });
-
-    window.scrollTo(0, 0);
 }
 
-/**
- * Shows the main profile view and hides policy/messages sections.
- */
-function showMainProfileView() {
-    document.getElementById('mainProfileView').style.display = 'block';
-    document.getElementById('policyContentArea').style.display = 'none';
-    document.getElementById('policy-content-display').style.display = 'none';
-    document.getElementById('mySupportMessagesSection').style.display = 'none';
-    window.scrollTo(0, 0);
-}
 
-/**
- * Updates dynamic content on the profile page based on `currentUserData`.
- */
 function updateProfileContent() {
     if (currentUserData) {
         const usernameEl = document.querySelector('#mainProfileView .text-xl.font-bold');
@@ -1632,8 +1623,7 @@ function updateProfileContent() {
         const emailEl = document.querySelector('#mainProfileView .text-sm.text-gray-500');
         if (emailEl) emailEl.textContent = currentUserData.email || auth.currentUser?.email || 'N/A';
 
-        // Update profile page referral count
-        const referralsEarnedEl = document.getElementById('profile-referrals-count'); // Using new ID
+        const referralsEarnedEl = document.getElementById('profile-referrals-count');
         if (referralsEarnedEl) {
             const countToDisplay = currentUserData.referrals_earned_count || 0;
             referralsEarnedEl.textContent = countToDisplay;
@@ -1661,12 +1651,6 @@ function updateProfileContent() {
     } else {
         console.warn("DEBUG: updateProfileContent called but currentUserData is null.");
     }
-}
-
-// NOTE: The `generateReferralLink(uid)` function is not strictly needed anymore as the referral code is just the username.
-// Keeping it for completeness if needed for a different "link" format later.
-function generateReferralLink(uid) {
-    return currentUserData?.username || '';
 }
 
 /**
@@ -1748,15 +1732,22 @@ function attachLoginListeners() {
         signupSubmitBtn.disabled = true;
 
         usernameTimer = setTimeout(async () => {
-            const snap = await db.ref('usernames/' + username.toLowerCase()).once('value');
-            if (snap.exists()) {
-                usernameAvailability.textContent = 'Username is already taken.';
+            try {
+                const snap = await db.ref('usernames/' + username.toLowerCase()).once('value');
+                if (snap.exists()) {
+                    usernameAvailability.textContent = 'Username is already taken.';
+                    usernameAvailability.className = 'text-xs mt-1 text-red-500';
+                    signupSubmitBtn.disabled = true;
+                } else {
+                    usernameAvailability.textContent = 'Username is available!';
+                    usernameAvailability.className = 'text-xs mt-1 text-green-500';
+                    signupSubmitBtn.disabled = false;
+                }
+            } catch (error) {
+                console.error("Error checking username availability:", error);
+                usernameAvailability.textContent = 'Error checking username.';
                 usernameAvailability.className = 'text-xs mt-1 text-red-500';
                 signupSubmitBtn.disabled = true;
-            } else {
-                usernameAvailability.textContent = 'Username is available!';
-                usernameAvailability.className = 'text-xs mt-1 text-green-500';
-                signupSubmitBtn.disabled = false;
             }
         }, 500);
     });
@@ -1777,113 +1768,74 @@ function attachLoginListeners() {
         e.preventDefault();
         const { signupUsernameModal, signupEmailModal, signupPasswordModal, signupReferralCodeModal } = e.target;
         const enteredReferralCode = signupReferralCodeModal.value.trim().toLowerCase();
-        const username = signupUsernameModal.value.trim(); // User-entered username, may not be lowercase yet for display purposes.
-
-        // --- Username Already Exist Check (Final Check before Auth Create) ---
-        const finalCheckSnap = await db.ref('usernames/' + username.toLowerCase()).once('value');
-        if (finalCheckSnap.exists()) {
-            showToast('Username is already taken. Please choose another.', true);
-            signupUsernameModal.focus();
-            return;
-        }
-        // --- END Username Already Exist Check ---
+        const username = signupUsernameModal.value.trim();
 
         try {
+            const finalCheckSnap = await db.ref('usernames/' + username.toLowerCase()).once('value');
+            if (finalCheckSnap.exists()) {
+                showToast('Username is already taken. Please choose another.', true);
+                signupUsernameModal.focus();
+                return;
+            }
+
             const cred = await auth.createUserWithEmailAndPassword(signupEmailModal.value, signupPasswordModal.value);
             const newUserId = cred.user.uid;
 
-            // --- START OF USER'S PROVIDED FINAL SIGNUP + REFERRAL CODE ---
-            // The global signupBonusAmount and referralBonusAmount are used here.
-
-            const initialSignupBonus = signupBonusAmount; // Use the globally defined signupBonusAmount
-            const referralBonus = referralBonusAmount;   // Use the globally defined referralBonusAmount
+            const initialSignupBonus = signupBonusAmount;
+            const referralBonus = referralBonusAmount;
 
             let newUserData = {
-                username: username, // Keep original casing for display, but use .toLowerCase() for DB keys/lookups where needed
+                username: username,
                 email: signupEmailModal.value,
-                wallet: { // NEW: Initialize wallet object with signup bonus in PKR
-                    PKR: initialSignupBonus,
-                    INR: 0,
-                    USD: 0
-                },
-                preferred_currency: 'PKR', // NEW: Set default preferred currency
+                wallet: { PKR: initialSignupBonus, INR: 0, USD: 0 },
+                preferred_currency: 'PKR',
                 referrals_earned_count: 0,
                 created_at: new Date().toISOString(),
                 locked: false,
                 lockReason: null
             };
-            // Set the new user's own referral_code based on their username
-            newUserData.referral_code = username.toLowerCase(); // Store as lowercase for consistency
+            newUserData.referral_code = username.toLowerCase();
 
-            // Debugging line: Check the data being prepared BEFORE referral logic
-            console.log("DEBUG (Signup): newUserData initialized with signup bonus:", { ...newUserData });
+            let feedbackMessage = `Signup successful! You got ${formatCurrency(initialSignupBonus, 'PKR')} 🎉`;
 
-            let feedbackMessage = `Signup successful! You got ${formatCurrency(initialSignupBonus, 'PKR')} 🎉`; // Default message for new user
-
-            // --- REFERRAL LOGIC ---
-            if (enteredReferralCode && enteredReferralCode !== username.toLowerCase()) { // Compare entered code (lowercase) with new user's username (lowercase)
-                console.log("DEBUG (Signup): Referral code detected:", enteredReferralCode);
-
-                // Use lowercase for DB lookup for referrer's UID
+            if (enteredReferralCode && enteredReferralCode !== username.toLowerCase()) {
                 const refSnap = await db.ref('usernames/' + enteredReferralCode).once('value');
 
                 if (refSnap.exists()) {
                     const referrerUid = refSnap.val();
-                    console.log("DEBUG (Signup): Referrer found. UID:", referrerUid);
-
-                    // Referrer wallet update (PKR) AND referral count update
                     await db.ref(`users/${referrerUid}`).transaction((data) => {
                         if (data) {
-                            // Ensure wallet structure exists
-                            if (!data.wallet) {
-                                data.wallet = { PKR: data.wallet_balance || 0, INR: 0, USD: 0 };
-                                delete data.wallet_balance;
-                            }
+                            if (!data.wallet) data.wallet = { PKR: data.wallet_balance || 0, INR: 0, USD: 0 };
                             data.wallet.PKR = (data.wallet.PKR !== null && typeof data.wallet.PKR === 'number' ? data.wallet.PKR : 0) + referralBonus;
-                            data.referrals_earned_count = (data.referrals_earned_count || 0) + 1; // Increment referral count
+                            data.referrals_earned_count = (data.referrals_earned_count || 0) + 1;
                         }
                         return data;
                     });
-                    console.log("DEBUG (Signup): Referrer wallet and referral count updated via transaction.");
-
-                    // Referrer transaction history
                     await db.ref(`transactions/${referrerUid}`).push({
-                        amount: referralBonus, // Use referralBonus
+                        amount: referralBonus,
                         type: "credit",
-                        currency: 'PKR', // NEW: Add currency
-                        description: `Referral bonus from ${username}`, // Show new user's username
+                        currency: 'PKR',
+                        description: `Referral bonus from ${username}`,
                         created_at: new Date().toISOString()
                     });
-                    console.log("DEBUG (Signup): Referrer transaction logged.");
-
-                    // Save referral info for new user (IMPORTANT)
-                    newUserData.referred_by_username = enteredReferralCode; // Save the entered referral username
-                    console.log("DEBUG (Signup): newUserData updated with referred_by_username:", newUserData.referred_by_username);
-                    feedbackMessage = `Signup successful! You got ${formatCurrency(initialSignupBonus, 'PKR')} & referrer rewarded 🎉`; // Update message
+                    newUserData.referred_by_username = enteredReferralCode;
+                    feedbackMessage = `Signup successful! You got ${formatCurrency(initialSignupBonus, 'PKR')} & referrer rewarded 🎉`;
                 } else {
-                    console.warn("DEBUG (Signup): Invalid referral username entered. Applying only signup bonus to new user.");
-                    feedbackMessage = `Signup successful! You got ${formatCurrency(initialSignupBonus, 'PKR')} (Invalid referral code)`; // Inform user, but still apply bonus
+                    feedbackMessage = `Signup successful! You got ${formatCurrency(initialSignupBonus, 'PKR')} (Invalid referral code)`;
                 }
-            } else if (enteredReferralCode === username.toLowerCase()) { // Compare lowercase
-                console.warn("DEBUG (Signup): User tried to refer self. Applying only signup bonus to new user.");
-                feedbackMessage = `Signup successful! You got ${formatCurrency(initialSignupBonus, 'PKR')} (Cannot refer yourself)`; // Inform user, but still apply bonus
+            } else if (enteredReferralCode === username.toLowerCase()) {
+                feedbackMessage = `Signup successful! You got ${formatCurrency(initialSignupBonus, 'PKR')} (Cannot refer yourself)`;
             }
 
-            // --- SAVE USER DATA (ONLY ONCE & LAST) ---
-            console.log("DEBUG (Signup): newUserData BEFORE final set for UID:", newUserId, { ...newUserData });
-
             const userRef = db.ref('users/' + newUserId);
-            // Pehle check karo data hai ya nahi (IMPORTANT: to prevent accidental overwrite if onAuthStateChanged creates a default)
             const snap = await userRef.once('value');
 
-            if (!snap.exists()) { // ONLY IF NOT EXISTS
+            if (!snap.exists()) {
                 await userRef.set(newUserData);
-                console.log("DEBUG (Signup): New user data saved successfully to Firebase (initially did not exist).");
             } else {
-                console.warn("DEBUG (Signup): User node already existed before signupForm.set(). Updating with correct data.");
                 await userRef.update({
-                    wallet: newUserData.wallet, // NEW: Update wallet object
-                    preferred_currency: newUserData.preferred_currency, // NEW: Update preferred currency
+                    wallet: newUserData.wallet,
+                    preferred_currency: newUserData.preferred_currency,
                     username: newUserData.username,
                     email: newUserData.email,
                     referral_code: newUserData.referral_code,
@@ -1892,29 +1844,20 @@ function attachLoginListeners() {
                     locked: newUserData.locked,
                     lockReason: newUserData.lockReason
                 });
-                console.log("DEBUG (Signup): Existing user node updated with correct wallet_balance and other data after signup.");
             }
 
-            // --- USERNAME MAPPING SAVE (using lowercase for consistency in 'usernames' node) ---
             await db.ref('usernames/' + username.toLowerCase()).set(newUserId);
-            console.log("DEBUG (Signup): Username mapping saved for:", username.toLowerCase());
 
-            // --- NEW USER TRANSACTION (Signup Bonus) ---
             await db.ref(`transactions/${newUserId}`).push({
                 amount: initialSignupBonus,
                 type: "credit",
-                currency: 'PKR', // NEW: Add currency
+                currency: 'PKR',
                 description: "Signup Bonus",
                 created_at: new Date().toISOString()
             });
-            console.log("DEBUG (Signup): Signup bonus transaction logged for new user.");
 
-            // Now display the toast message after all database writes for the new user are done.
             showToast(feedbackMessage);
 
-            // --- END OF USER'S PROVIDED FINAL SIGNUP + REFERRAL CODE ---
-
-            // Reset UI
             toggleModal('authModal', false);
             signupForm.reset();
             signupReferralCodeModal.value = '';
@@ -1926,9 +1869,10 @@ function attachLoginListeners() {
         }
     });
 }
-// --- END REFERRAL LOGIC ---
 
-// --- NEW FUNCTION: Claim Daily Bonus ---
+/**
+ * Handles claiming daily bonus.
+ */
 async function claimDailyBonus() {
     if (!auth.currentUser) {
         showToast('Login required to claim daily bonus!', true);
@@ -1954,7 +1898,7 @@ async function claimDailyBonus() {
         }
 
         const lastClaimTimestamp = userData.last_daily_bonus_claim_timestamp || 0;
-        const twentyFourHours = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+        const twentyFourHours = 24 * 60 * 60 * 1000;
 
         if (Date.now() - lastClaimTimestamp < twentyFourHours) {
             const timeLeft = twentyFourHours - (Date.now() - lastClaimTimestamp);
@@ -1966,11 +1910,9 @@ async function claimDailyBonus() {
             return;
         }
 
-        // Generate random bonus between 10 and 1000 (inclusive)
         const randomBonus = Math.floor(Math.random() * 80) + 10;
         
         let committed = false;
-        // Daily Bonus is always given in PKR
         const walletRef = db.ref(`users/${userUid}/wallet/PKR`);
 
         await walletRef.transaction(data => {
@@ -1985,11 +1927,10 @@ async function claimDailyBonus() {
                 db.ref(`transactions/${userUid}`).push({
                     amount: randomBonus,
                     type: 'credit',
-                    currency: 'PKR', // Always in PKR
+                    currency: 'PKR',
                     description: 'Daily Bonus',
                     created_at: new Date().toISOString()
                 });
-                // Also update the last claim timestamp in the user's root
                 userRef.update({
                     last_daily_bonus_claim_timestamp: Date.now(),
                     daily_bonus_withdrawal_condition_active: true
@@ -2017,7 +1958,6 @@ async function claimDailyBonus() {
         window.open('https://toolswebsite205.blogspot.com', '_blank');
     }
 }
-// --- END NEW FUNCTION: Claim Daily Bonus ---
 
 /**
  * Attaches event listeners for the tabs on the My Tournaments page.
@@ -2055,21 +1995,26 @@ async function joinTournament(event, tournamentId, entryFee) {
     // Tournaments entry fee is always PKR
     if ((currentUserData.wallet.PKR || 0) < entryFee) return showToast('Insufficient PKR balance!', true);
 
-    const tournamentSnap = await db.ref(`tournaments/${tournamentId}/title`).once('value');
-    const tournamentTitle = tournamentSnap.val() || 'Unknown Tournament';
+    try {
+        const tournamentSnap = await db.ref(`tournaments/${tournamentId}/title`).once('value');
+        const tournamentTitle = tournamentSnap.val() || 'Unknown Tournament';
 
-    const newTransactionKey = db.ref().child('transactions').push().key; // Use push directly on transactions node
+        const newTransactionKey = db.ref().child('transactions').push().key;
 
-    const updates = {
-        [`/users/${user.uid}/wallet/PKR`]: (currentUserData.wallet.PKR || 0) - entryFee, // NEW: Deduct from PKR wallet
-        [`/participants/${tournamentId}/${user.uid}`]: { status: 'Participated', joined_at: new Date().toISOString() },
-        [`/transactions/${user.uid}/${newTransactionKey}`]: { amount: entryFee, type: 'debit', currency: 'PKR', description: `Entry: ${tournamentTitle}`, created_at: new Date().toISOString() }
-    };
-    await db.ref().update(updates);
-    showToast('Joined successfully!');
+        const updates = {
+            [`/users/${user.uid}/wallet/PKR`]: (currentUserData.wallet.PKR || 0) - entryFee,
+            [`/participants/${tournamentId}/${user.uid}`]: { status: 'Participated', joined_at: new Date().toISOString() },
+            [`/transactions/${user.uid}/${newTransactionKey}`]: { amount: entryFee, type: 'debit', currency: 'PKR', description: `Entry: ${tournamentTitle}`, created_at: new Date().toISOString() }
+        };
+        await db.ref().update(updates);
+        showToast('Joined successfully!');
 
-    if (document.getElementById('myTournamentsPage').classList.contains('active')) {
-        renderMyTournamentsPage(document.getElementById('myTournamentsPage'));
+        if (document.getElementById('myTournamentsPage').classList.contains('active')) {
+            renderMyTournamentsPage(document.getElementById('myTournamentsPage'));
+        }
+    } catch (error) {
+        console.error("Error joining tournament:", error);
+        showToast('Failed to join tournament. ' + error.message, true);
     }
 }
 
@@ -2105,21 +2050,26 @@ async function addMoney(event) {
         return showToast(`Your account is locked. Please contact support. ${lockReason}`, true);
     }
 
-    await db.ref(`pending_deposits/${user.uid}`).push({
-        amount: amount,
-        tid: tid,
-        source_details: sourceType,
-        status: 'pending',
-        currency: 'PKR', // NEW: Deposits are in PKR
-        created_at: new Date().toISOString(),
-        user_email: currentUserData.email || user.email,
-        user_username: currentUserData.username || 'N/A'
-    });
+    try {
+        await db.ref(`pending_deposits/${user.uid}`).push({
+            amount: amount,
+            tid: tid,
+            source_details: sourceType,
+            status: 'pending',
+            currency: 'PKR',
+            created_at: new Date().toISOString(),
+            user_email: currentUserData.email || user.email,
+            user_username: currentUserData.username || 'N/A'
+        });
 
-    showToast('Deposit request submitted! Awaiting verification.');
-    toggleModal('addMoneyModal', false);
-    event.target.reset();
-    acceptRulesCheckbox.checked = false; // Reset checkbox after submission
+        showToast('Deposit request submitted! Awaiting verification.');
+        toggleModal('addMoneyModal', false);
+        event.target.reset();
+        acceptRulesCheckbox.checked = false;
+    } catch (error) {
+        console.error("Error submitting deposit request:", error);
+        showToast('Failed to submit deposit request. ' + error.message, true);
+    }
 }
 
 /**
@@ -2130,14 +2080,13 @@ async function withdrawMoney(event) {
     event.preventDefault();
 
     const amount = Number(document.getElementById('withdraw-amount').value);
-    const currency = document.getElementById('withdraw-currency').value; // NEW
+    const currency = document.getElementById('withdraw-currency').value;
     const withdrawNumber = document.getElementById('withdraw-number').value.trim();
     const ownerName = document.getElementById('withdraw-owner-name').value.trim();
-    const accountType = document.getElementById('withdraw-account-type').value; // NEW (it's a select)
+    const accountType = document.getElementById('withdraw-account-type').value;
     const acceptRulesCheckbox = document.getElementById('acceptWithdrawalRules'); 
 
-    // Dynamic minimum withdrawal check
-    let minWithdraw = minWithdrawalAmount; // Default is PKR
+    let minWithdraw = minWithdrawalAmount;
     if(currency !== 'PKR') {
         const rate = getExchangeRate('PKR', currency);
         minWithdraw = minWithdrawalAmount * rate;
@@ -2163,24 +2112,17 @@ async function withdrawMoney(event) {
         const lockReason = currentUserData?.lockReason ? `Reason: ${currentUserData.lockReason}` : '';
         return showToast(`Your account is locked. Please contact support. ${lockReason}`, true);
     }
-    // Withdrawals from the selected currency balance
     if (amount > (currentUserData.wallet[currency] || 0)) {
         return showToast(`Insufficient ${currency} funds!`, true);
     }
 
-    // --- WITHDRAWAL RULE CHECK FOR DAILY BONUS (Only applies if withdrawing from PKR) ---
     if (currency === 'PKR' && currentUserData.daily_bonus_withdrawal_condition_active) {
-        console.log("DEBUG: Daily bonus withdrawal condition is active.");
         const requiredReferrals = 10; 
-
         if ((currentUserData.referrals_earned_count || 0) < requiredReferrals) {
             showToast(`Withdrawal from PKR requires at least ${requiredReferrals} referrals for bonus funds. You have ${currentUserData.referrals_earned_count || 0}.`, true);
             return;
         }
-        
-        console.log(`DEBUG: Daily bonus withdrawal conditions (referral count) met: ${currentUserData.referrals_earned_count}. Proceeding.`);
     }
-    // --- END WITHDRAWAL RULE CHECK ---
 
     const uid = user.uid;
 
@@ -2193,7 +2135,7 @@ async function withdrawMoney(event) {
             if (balance >= amount) {
                 return balance - amount;
             }
-            return undefined; // Abort transaction
+            return undefined;
         }, async (error, _committed, snapshot) => {
             if (error) {
                 console.error("Withdrawal deduction failed: ", error);
@@ -2206,7 +2148,7 @@ async function withdrawMoney(event) {
                 await transactionRef.set({
                     amount: amount,
                     type: 'debit',
-                    currency: currency, // Store the currency of withdrawal
+                    currency: currency,
                     description: `Withdrawal request for ${accountType} (${withdrawNumber})`,
                     status: 'pending',
                     created_at: new Date().toISOString()
@@ -2254,7 +2196,6 @@ async function updateUserPreferredCurrency(e) {
             preferred_currency: newCurrency
         });
         showToast(`Preferred currency set to ${newCurrency}!`);
-        // The real-time listener will automatically update the UI.
     } catch (error) {
         console.error("Error updating preferred currency:", error);
         showToast("Failed to update preference.", true);
@@ -2264,7 +2205,7 @@ async function updateUserPreferredCurrency(e) {
 
 /**
  * Handles adding a new game submitted by a user.
- * Deducts cost from wallet and adds game to Firebase `pending_games` node.
+ * Deducts cost from wallet based on play limit and adds game to Firebase `pending_games` node.
  * @param {Event} event - The form submission event.
  */
 async function addNewGame(event) {
@@ -2284,22 +2225,46 @@ async function addNewGame(event) {
     const gameImageUrl = document.getElementById('gameImageUrlInput').value.trim();
     const gameUrl = document.getElementById('gameUrlInput').value.trim();
     const gameCategory = document.getElementById('gameCategoryInput').value.trim(); 
+    const playLimit = parseInt(document.getElementById('gamePlayLimitInput').value, 10);
 
-    if (!gameTitle || !gameImageUrl || !gameUrl || !gameCategory) { 
-        showToast('All fields are required!', true);
+    if (!gameTitle || !gameImageUrl || !gameUrl || !gameCategory || isNaN(playLimit) || playLimit <= 0) { 
+        showToast('All fields are required, and Play Limit must be a positive number!', true);
         return;
     }
 
-    const gameCost = 100; // Game cost is in PKR
+    // NEW FEATURE: Category Restriction Validation
+    try {
+        const allApprovedGamesSnapshot = await db.ref('games').orderByChild('status').equalTo('approved').once('value');
+        const existingCategories = new Set();
+        allApprovedGamesSnapshot.forEach(childSnap => {
+            const game = childSnap.val();
+            if (game.category) {
+                existingCategories.add(game.category.trim().toLowerCase());
+            }
+        });
 
-    if (!currentUserData || (currentUserData.wallet.PKR || 0) < gameCost) { // NEW: Check PKR wallet
-        showToast(`Insufficient balance. You need ${formatCurrency(gameCost, 'PKR')} to add a game.`, true);
+        // If the submitted category is not 'Uncategorized' and doesn't exist among approved categories
+        if (gameCategory.toLowerCase() !== 'uncategorized' && !existingCategories.has(gameCategory.toLowerCase())) {
+            showToast(`You must use an existing game category (e.g., ${Array.from(existingCategories).join(', ')}). "Uncategorized" is also an option if applicable.`, true);
+            return;
+        }
+    } catch (error) {
+        console.error("Error validating game category:", error);
+        showToast('Failed to validate game category. Please try again.', true);
+        return;
+    }
+
+
+    const gameCost = playLimit;
+
+    if (!currentUserData || (currentUserData.wallet.PKR || 0) < gameCost) {
+        showToast(`Insufficient balance. You need ${formatCurrency(gameCost, 'PKR')} to add this game.`, true);
         return;
     }
 
     try {
-        const userWalletPKRRef = db.ref(`users/${user.uid}/wallet/PKR`); // NEW: Target PKR wallet
-        const pendingGameRef = db.ref('pending_games').push(); // Store in pending_games
+        const userWalletPKRRef = db.ref(`users/${user.uid}/wallet/PKR`);
+        const pendingGameRef = db.ref('pending_games').push();
         const transactionRef = db.ref(`transactions/${user.uid}`).push();
 
         let committed = false;
@@ -2320,22 +2285,25 @@ async function addNewGame(event) {
                     game_url: gameUrl,
                     category: gameCategory, 
                     created_by: user.uid,
-                    created_by_username: currentUserData.username || 'N/A', // Add username for admin context
+                    created_by_username: currentUserData.username || 'N/A',
                     created_at: new Date().toISOString(),
-                    status: 'pending' // Mark as pending for admin approval
+                    status: 'pending', // Mark as pending for admin approval
+                    play_limit: playLimit,
+                    play_count: 0,
+                    notified_play_limit_reached: false // Flag to track if user has been notified
                 });
                 await transactionRef.set({
                     amount: gameCost,
                     type: 'debit',
-                    currency: 'PKR', // NEW: Add currency
-                    description: `Cost for game submission (pending approval): ${gameTitle}`,
+                    currency: 'PKR',
+                    description: `Cost for game submission (${playLimit} plays): ${gameTitle}`,
                     created_at: new Date().toISOString()
                 });
 
                 showToast('Game submitted successfully! It will appear on the homepage after admin approval.');
                 toggleModal('addGameModal', false);
                 event.target.reset();
-                // No need to call loadPageContent('homePage') immediately as it's pending approval
+                document.getElementById('gameSubmissionCost').textContent = 'Cost: PKR 0';
             } else {
                 showToast(`Transaction aborted: Insufficient balance. You need ${formatCurrency(gameCost, 'PKR')} to add a game.`, true);
             }
@@ -2410,7 +2378,7 @@ function openExchangeCurrencyModal() {
 
     document.getElementById('exchange-amount').value = '';
     document.getElementById('exchange-from-currency').value = currentUserData.preferred_currency || 'PKR';
-    document.getElementById('exchange-to-currency').value = (currentUserData.preferred_currency === 'PKR' ? 'INR' : 'PKR'); // Default to a different currency
+    document.getElementById('exchange-to-currency').value = (currentUserData.preferred_currency === 'PKR' ? 'INR' : 'PKR');
     document.getElementById('exchange-error-message').style.display = 'none';
     document.getElementById('exchange-result-message').style.display = 'none';
 
@@ -2458,7 +2426,7 @@ async function exchangeCurrency(e) {
         return;
     }
 
-    if (!currentUserData || !currentUserData.wallet) {
+    if (!auth.currentUser || !currentUserData || !currentUserData.wallet) {
         errorMessageEl.textContent = 'User data not loaded. Please re-login.';
         errorMessageEl.style.display = 'block';
         return;
@@ -2491,19 +2459,18 @@ async function exchangeCurrency(e) {
                     currentWallet[toCurrency] = (currentWallet[toCurrency] || 0) + convertedAmount;
                     
                     if (currentUserData.preferred_currency === fromCurrency && currentWallet[fromCurrency] < 0.01) {
-                         shouldChangePreferredCurrency = true; // Flag this for later
+                         shouldChangePreferredCurrency = true;
                     }
                     return currentWallet;
                 }
             }
-            return undefined; // Abort transaction if funds are insufficient
+            return undefined;
         }, async (error, committed, snapshot) => {
             if (error) {
                 console.error('Currency exchange transaction failed:', error);
                 errorMessageEl.textContent = `Exchange failed: ${error.message}`;
                 errorMessageEl.style.display = 'block';
             } else if (committed) {
-                // If the transaction was successful, now update preferred_currency if needed
                 if (shouldChangePreferredCurrency) {
                     await db.ref(`users/${userId}`).update({ preferred_currency: toCurrency });
                 }
@@ -2523,8 +2490,6 @@ async function exchangeCurrency(e) {
                 resultMessageEl.style.display = 'block';
                 showToast(resultMessageEl.textContent);
                 
-                // Refresh balances in modal (and overall UI via listener)
-                // The listener will update the global currentUserData, so we just need to re-run the modal setup
                 setTimeout(() => openExchangeCurrencyModal(), 100); 
             } else {
                 errorMessageEl.textContent = 'Exchange aborted: Insufficient funds or another operation occurred.';
@@ -2571,32 +2536,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('withdrawMoneyForm').addEventListener('submit', withdrawMoney);
     document.getElementById('addGameForm').addEventListener('submit', addNewGame);
     document.getElementById('contactUsForm').addEventListener('submit', sendContactMessage);
-    document.getElementById('exchangeCurrencyForm').addEventListener('submit', exchangeCurrency); // NEW: Attach exchange form listener
+    document.getElementById('exchangeCurrencyForm').addEventListener('submit', exchangeCurrency);
 
-    // Fetch global app settings from Firebase and update UI elements
-    const appSettingsSnap = await db.ref('app_settings').once('value');
-    const appSettings = appSettingsSnap.val();
-    if (appSettings) {
-        adminDepositNumber = appSettings.adminDepositNumber || adminDepositNumber;
-        minWithdrawalAmount = appSettings.minWithdrawalAmount || minWithdrawalAmount;
-        referralBonusAmount = appSettings.referralBonusAmount || referralBonusAmount;
-        signupBonusAmount = appSettings.signupBonusAmount || signupBonusAmount;
+    const gamePlayLimitInput = document.getElementById('gamePlayLimitInput');
+    const gameSubmissionCostDisplay = document.getElementById('gameSubmissionCost');
 
-        const adminDepositNumEl = document.getElementById('admin-deposit-number');
-        if (adminDepositNumEl) adminDepositNumEl.textContent = adminDepositNumber;
-        const withdrawAmountInput = document.getElementById('withdraw-amount');
-        if (withdrawAmountInput) withdrawAmountInput.placeholder = `Enter amount min ${minWithdrawalAmount}`;
-        const referralBonusTextEl = document.getElementById('referral-bonus-text');
-        if (referralBonusTextEl) referralBonusTextEl.textContent = referralBonusAmount;
+    if (gamePlayLimitInput && gameSubmissionCostDisplay) {
+        gamePlayLimitInput.addEventListener('input', () => {
+            const playLimit = parseInt(gamePlayLimitInput.value, 10);
+            if (!isNaN(playLimit) && playLimit > 0) {
+                gameSubmissionCostDisplay.textContent = `Cost: ${formatCurrency(playLimit, 'PKR')}`;
+            } else {
+                gameSubmissionCostDisplay.textContent = 'Cost: PKR 0';
+            }
+        });
     }
 
-    // Fetch exchange rates from Firebase (if not fetched by auth.onAuthStateChanged yet)
-    // This is a fallback/redundancy for robustness.
-    const exchangeRatesSnap = await db.ref('exchange_rates').once('value');
-    if (exchangeRatesSnap.exists()) {
-        exchangeRates = { ...exchangeRates, ...exchangeRatesSnap.val() };
-    }
-
-    // Set initial page view
     navigateTo('homePage');
 });
