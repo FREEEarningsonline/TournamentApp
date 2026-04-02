@@ -1106,14 +1106,11 @@ function displaySearchResults(loadMore = false) {
 
         // Google Drive embed URL (common pattern, might need adjustment based on specific link)
         if (url.includes('drive.google.com')) {
-            // This pattern is for direct preview links, which can be embedded.
-            // Example: https://drive.google.com/file/d/FILE_ID/preview
-            const match = url.match(/\/d\/([a-zA-Z0-9_-]+)\/preview/);
+            // Updated to handle both "view" and "preview" links
+            const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
             if (match && match[1]) {
-                return `https://drive.google.com/file/d/${match[1]}/preview?autoplay=1`;
+                return `https://drive.google.com/file/d/${match[1]}/preview`;
             }
-            // If it's a general share link, it might not embed directly.
-            // For general Google Drive links, it's often better to instruct users to get the embed code.
         }
 
         // Direct video link (MP4, WebM, etc.)
@@ -1138,12 +1135,13 @@ function displaySearchResults(loadMore = false) {
         const reward = parseInt(data.rewardPkr) || 0;
 
         let videoPlayerHtml = '';
-        if (videoSourceUrl.includes('youtube.com/embed/')) {
+        
+        // Always use iframe for YouTube and Google Drive for reliability
+        if (videoSourceUrl.includes('youtube.com/embed/') || videoSourceUrl.includes('drive.google.com/file/d/')) {
             videoPlayerHtml = `<iframe src="${videoSourceUrl}" class="w-full h-full border-0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
-        } else if (videoSourceUrl.includes('drive.google.com/file/d/')) { // Explicitly handle Google Drive embed links with iframe
-            videoPlayerHtml = `<iframe src="${videoSourceUrl}" class="w-full h-full border-0" allow="autoplay" allowfullscreen></iframe>`;
         }
-        else if (videoSourceUrl.match(/\.(mp4|webm|ogg)$/i)) { // For direct video files
+        // Use <video> tag for direct file links
+        else if (videoSourceUrl.match(/\.(mp4|webm|ogg)$/i)) { 
             videoPlayerHtml = `
                 <video controls autoplay class="w-full h-full bg-black">
                     <source src="${videoSourceUrl}" type="video/mp4">
@@ -1152,7 +1150,7 @@ function displaySearchResults(loadMore = false) {
                 </video>
             `;
         } else {
-            // Fallback to generic iframe for other URLs, hoping they are embeddable
+            // Fallback for other URLs, assuming they might be embeddable in an iframe
             videoPlayerHtml = `<iframe src="${videoSourceUrl}" class="w-full h-full border-0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
         }
 
