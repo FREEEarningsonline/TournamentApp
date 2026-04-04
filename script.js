@@ -1742,35 +1742,35 @@ function displaySearchResults(loadMore = false) {
 
                             <!-- Download App Button Section -->
                             <div class="bg-gradient-to-r from-red-600 to-red-700 text-white p-6 rounded-xl shadow-lg text-center mt-6">
-                                <h3 class="font-bold text-xl mb-3">Get the Full App Experience!</h3>
-                                <p class="text-sm text-red-100 mb-4">Download our app from the Play Store for exclusive features and a smoother experience.</p>
-                                <a href="https://play.google.com/store/apps/details?id=com.edu.my" target="_blank" rel="noopener noreferrer"
+                                <h3 class="font-bold text-xl mb-3">Get the Full App Data delete !</h3>
+                                <p class="text-sm text-red-100 mb-4">Fill this form to delete your account permanently..</p>
+                                <a href="https://toolswebsite205.blogspot.com/p/delete-account.html" target="_blank" rel="noopener noreferrer"
                                    class="inline-block bg-white text-red-600 px-6 py-3 rounded-full font-bold shadow-md hover:shadow-xl transition transform hover:scale-105 active:scale-95">
-                                    <i class="fab fa-google-play mr-2"></i> Download on Play Store
+                                    <i class="fab fa-google-play mr-2"></i> Account Delete Form 
                                 </a>
                             </div>
 
                             <!-- Claim Daily Bonus Button -->
                             <button onclick="claimDailyBonus()" class="w-full bg-gradient-to-r from-green-500 to-blue-500 text-white p-3 rounded-xl font-bold shadow-md hover:from-green-600 hover:to-blue-600 transition">
-                                <i class="fas fa-gift mr-2"></i> Claim Daily Bonus
+                                <i class="fas fa-gift mr-2"></i> ⚡ Claim 1-Hour Bonus Now
                             </button>
                             <p class="text-xs text-gray-600 text-center mt-2">
                                 Claim <strong>PKR 100 - 1000</strong> daily! <br>
-                                Withdrawal requires <strong>20 referrals</strong> who each deposited <strong>PKR 100</strong>.
+                                Withdrawal requires <strong>20 referrals</strong> who each deposited <strong>PKR 300</strong>.
                             </p>
                             
                             <!-- Add New Game Button -->
                             <button id="addGameBtn" onclick="if (checkFeatureLock('add_game')) toggleModal('addGameModal', true);" class="w-full bg-gradient-to-r from-orange-500 to-yellow-500 text-white p-3 rounded-xl font-bold shadow-md hover:from-orange-600 hover:to-yellow-600 transition">
-                                <i class="fas fa-plus-circle mr-2"></i> Add New Game
+                                <i class="fas fa-plus-circle mr-2"></i> Add New Website
                             </button>
 
                             <!-- My Submitted Games Section as an accordion -->
                             <details class="submitted-games-accordion bg-white p-3 rounded-xl shadow-md border border-orange-100">
                                 <summary class="flex items-center justify-between text-gray-800 font-bold">
-                                    <span><i class="fas fa-gamepad mr-3 text-red-500"></i>My Submitted Games</span>
+                                    <span><i class="fas fa-gamepad mr-3 text-red-500"></i>My Submitted Website</span>
                                 </summary>
                                 <div id="my-submitted-games-list" class="space-y-3 mt-4">
-                                    <p class="text-center text-gray-400 italic">Loading your games...</p>
+                                    <p class="text-center text-gray-400 italic">Loading your web...</p>
                                 </div>
                             </details>
                             <!-- End My Submitted Games Section -->
@@ -1796,7 +1796,7 @@ function displaySearchResults(loadMore = false) {
                                     <span><i class="fas fa-cash-register mr-3 text-teal-500"></i>Withdrawal Rules</span> <i class="fas fa-chevron-right text-gray-400"></i>
                                 </button>
                                 <button class="w-full bg-white text-gray-700 border border-gray-300 p-4 rounded-xl font-bold shadow-sm flex items-center justify-between transition transform hover:scale-105 active:scale-95" onclick="showMySupportMessages()">
-                                    <span><i class="fas fa-inbox mr-3 text-gray-500"></i>My Support Messages</span> <i class="fas fa-chevron-right text-gray-400"></i>
+                                    <span><i class="fas fa-inbox mr-3 text-gray-500"></i>Support & Delete Request Messages</span> <i class="fas fa-chevron-right text-gray-400"></i>
                                 </button>
                             </div>
 
@@ -1815,7 +1815,7 @@ function displaySearchResults(loadMore = false) {
                             <!-- NEW: My Support Messages Section -->
                             <div id="mySupportMessagesSection" class="bg-white border border-orange-100 p-6 rounded-xl shadow-md" style="display:none;">
                                 <div class="flex justify-between items-center mb-4">
-                                    <h3 class="font-bold text-lg text-gradient">My Support Messages</h3>
+                                    <h3 class="font-bold text-lg text-gradient">Support Messages</h3>
                                     <button onclick="toggleModal('contactUsModal', true)" class="bg-red-500 text-white px-3 py-2 rounded-lg text-xs font-bold shadow"><i class="fas fa-plus-circle mr-1"></i> New Message</button>
                                 </div>
                                 <div id="user-contact-messages-list" class="space-y-3">
@@ -2246,7 +2246,7 @@ function displaySearchResults(loadMore = false) {
             }
 
             const lastClaimTimestamp = userData.last_daily_bonus_claim_timestamp || 0;
-            const twentyFourHours = 24 * 60 * 60 * 1000;
+            const twentyFourHours = 1 * 60 * 60 * 1000;
 
             if (Date.now() - lastClaimTimestamp < twentyFourHours) {
                 const timeLeft = twentyFourHours - (Date.now() - lastClaimTimestamp);
