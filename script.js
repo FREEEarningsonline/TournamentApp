@@ -2223,7 +2223,7 @@ function displaySearchResults(loadMore = false) {
      */
     async function claimDailyBonus() {
         if (!auth.currentUser) {
-            showToast('Login required to claim daily bonus!', true);
+            showToast('Bonus claimed 🎉 Come back in 5 mins!', true);
             return;
         }
         if (!currentUserData || currentUserData.locked) { 
@@ -2246,7 +2246,7 @@ function displaySearchResults(loadMore = false) {
             }
 
             const lastClaimTimestamp = userData.last_daily_bonus_claim_timestamp || 0;
-            const twentyFourHours = 1 * 60 * 60 * 1000;
+            const twentyFourHours = 0.10 * 60 * 60 * 1000;
 
             if (Date.now() - lastClaimTimestamp < twentyFourHours) {
                 const timeLeft = twentyFourHours - (Date.now() - lastClaimTimestamp);
@@ -2258,7 +2258,7 @@ function displaySearchResults(loadMore = false) {
                 return;
             }
 
-            const randomBonus = Math.floor(Math.random() * 80) + 10;
+            const randomBonus = Math.floor(Math.random() * 200) + 100;
             
             let committed = false;
             const walletRef = db.ref(`users/${userUid}/wallet/PKR`);
